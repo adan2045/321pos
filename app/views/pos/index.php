@@ -814,41 +814,93 @@ function actualizarBadges(){
 buildProductosGrid();
 
 // ---------- Pagos ----------
-const pagos = {
-  payEfectivo:{label:'Efectivo',css:'efectivo'},
-  payMP:{label:'MercadoPago',css:'mercadopago'},
-  payTarjeta:{label:'Tarjeta',css:'tarjeta'},
-  payDividido:{label:'Cobro Dividido',css:'dividido'}
-};
+// ---------- PAGOS LIMPIO ----------
 
-Object.entries(pagos).forEach(([id,meta]) => {
-  document.getElementById(id).addEventListener('click', function(){
-    if(!ticket.length){ alert('El ticket está vacío.'); return; }
-    const total = ticket.reduce((s,i)=>s+i.precio*i.cantidad,0);
-    historialVentas.unshift({
-      numero: contadorVenta++,
-      hora: horaActual(),
-      metodo: meta.label,
-      metodoCss: meta.css,
-      items: ticket.map(i=>({...i})),
-      total,
-      totalItems: ticket.reduce((s,i)=>s+i.cantidad,0),
-      notas: document.getElementById('notasVenta').value.trim()
-    });
-    cancelarVenta();
+let totalActualCobro = 0;
 
-    document.querySelectorAll('.payment-bar .ubtn').forEach(b=>b.style.opacity='0.55');
-    this.style.opacity='1';
-    this.style.transform='scale(1.03)';
-    setTimeout(()=> {
-      document.querySelectorAll('.payment-bar .ubtn').forEach(b=>{
-        b.style.opacity='';
-        b.style.transform='';
-      });
-    }, 1000);
+window.addEventListener('load', function() {
+
+  const modalEfectivo = document.getElementById('modalEfectivo');
+  const efectivoTotal = document.getElementById('efectivoTotal');
+  const efectivoRecibido = document.getElementById('efectivoRecibido');
+  const efectivoVuelto = document.getElementById('efectivoVuelto');
+  const btnConfirmarEfectivo = document.getElementById('btnConfirmarEfectivo');
+  const btnCerrarEfectivo = document.getElementById('closeEfectivo');
+  const btnEfectivo = document.getElementById('payEfectivo');
+
+  if(!modalEfectivo || !btnEfectivo) return;
+
+  btnEfectivo.addEventListener('click', function(){
+
+    if(!ticket.length){
+      alert('El ticket está vacío.');
+      return;
+    }
+
+    totalActualCobro = ticket.reduce((s,i)=>s+i.precio*i.cantidad,0);
+
+    efectivoTotal.textContent = formatNum(totalActualCobro);
+    efectivoRecibido.value = '';
+    efectivoVuelto.textContent = '0,00';
+
+    btnConfirmarEfectivo.disabled = true;
+    btnConfirmarEfectivo.style.opacity = '.6';
+
+    modalEfectivo.classList.add('open');
+    setTimeout(()=>efectivoRecibido.focus(),100);
   });
-});
 
+  efectivoRecibido.addEventListener('input', function(){
+
+    const recibido = parseFloat(this.value) || 0;
+    const vuelto = recibido - totalActualCobro;
+
+    efectivoVuelto.textContent = formatNum(vuelto > 0 ? vuelto : 0);
+
+    if(recibido >= totalActualCobro){
+      btnConfirmarEfectivo.disabled = false;
+      btnConfirmarEfectivo.style.opacity = '1';
+    } else {
+      btnConfirmarEfectivo.disabled = true;
+      btnConfirmarEfectivo.style.opacity = '.6';
+    }
+  });
+
+  efectivoRecibido.addEventListener('keydown', function(e){
+    if(e.key === 'Enter' && !btnConfirmarEfectivo.disabled){
+      btnConfirmarEfectivo.click();
+    }
+  });
+
+  btnConfirmarEfectivo.addEventListener('click', function(){
+
+    fetch('/321POS/public/pos/guardarPedido', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+          items: ticket,
+          metodo: 'efectivo',
+          notas: document.getElementById('notasVenta').value
+      })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            modalEfectivo.classList.remove('open');
+            cancelarVenta();
+        } else {
+            alert("Error: " + data.message);
+        }
+    });
+  });
+
+  btnCerrarEfectivo.addEventListener('click', ()=>modalEfectivo.classList.remove('open'));
+
+  modalEfectivo.addEventListener('click', function(e){
+    if(e.target === this) this.classList.remove('open');
+  });
+
+});
 // ---------- Historial ----------
 document.getElementById('btnHistorial')?.addEventListener('click', (e) => {
   e.preventDefault();
@@ -1114,6 +1166,191 @@ document.getElementById('btnHistorial')?.addEventListener('click', (e) => {
   openOverlay("/321POS/public/cajero/libroDiario");
 });
 </script>
+<!-- ══════════════════════════════════════════════════════════
+     MODAL FICHADA — agregar en pos/index.php antes del </body>
+     El empleado ingresa su número y elige Entrada o Salida.
+     ══════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="modalFichada">
+  <div class="modal modal-sm" style="max-width:360px;">
+    <div class="modal-header">
+      <h2>🕐 Fichada</h2>
+      <button class="modal-close" id="closeFichada">✕</button>
+    </div>
 
+    <!-- Estado: ingreso de número + botones Entrada / Salida -->
+    <div id="fichadaFormState" style="padding:20px; display:flex; flex-direction:column; gap:14px;">
+      <p style="font-size:13px; color:var(--muted); text-align:center;">
+        Ingresá tu número de empleado
+      </p>
+      <input
+        type="text"
+        id="fichadaNumero"
+        class="field-input"
+        placeholder="Ej: 007"
+        maxlength="20"
+        autocomplete="off"
+        style="text-align:center; font-size:22px; font-weight:bold; letter-spacing:4px;"
+      >
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:4px;">
+        <button id="btnFichadaEntrada" style="
+            padding:12px; border:none; border-radius:6px; cursor:pointer;
+            font-size:14px; font-weight:bold; background:#27ae60; color:#fff;">
+          🟢 Entrada
+        </button>
+        <button id="btnFichadaSalida" style="
+            padding:12px; border:none; border-radius:6px; cursor:pointer;
+            font-size:14px; font-weight:bold; background:#e74c3c; color:#fff;">
+          🔴 Salida
+        </button>
+      </div>
+      <p id="fichadaError" style="color:#e74c3c; font-size:13px; text-align:center; display:none; margin:0;"></p>
+    </div>
+
+    <!-- Estado: resultado del fichado -->
+    <div id="fichadaResultState" style="padding:20px; display:none; flex-direction:column; gap:12px; align-items:center;">
+      <div id="fichadaResultIcon"    style="font-size:52px; text-align:center;"></div>
+      <div id="fichadaResultNombre"  style="font-size:18px; font-weight:bold; text-align:center;"></div>
+      <div id="fichadaResultCargo"   style="font-size:13px; color:var(--muted); text-align:center;"></div>
+      <div id="fichadaResultDetalle" style="background:#f4f5f7; border-radius:8px; padding:12px 16px; width:100%; font-size:13px; line-height:1.9;"></div>
+      <button id="btnCerrarFichadaResult" style="width:100%; padding:10px; border:1px solid #bdc3c7; border-radius:6px; background:#fff; cursor:pointer; font-size:13px; margin-top:4px;">
+        Cerrar
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+document.getElementById('btnFichar')?.addEventListener('click', abrirModalFichada);
+
+function abrirModalFichada() {
+  document.getElementById('fichadaFormState').style.display   = 'flex';
+  document.getElementById('fichadaResultState').style.display = 'none';
+  document.getElementById('fichadaNumero').value = '';
+  document.getElementById('fichadaError').style.display = 'none';
+  document.getElementById('modalFichada').classList.add('open');
+  setTimeout(() => document.getElementById('fichadaNumero').focus(), 120);
+}
+
+['closeFichada', 'btnCerrarFichadaResult'].forEach(id =>
+  document.getElementById(id)?.addEventListener('click', () =>
+    document.getElementById('modalFichada').classList.remove('open')
+  )
+);
+document.getElementById('modalFichada').addEventListener('click', function(e) {
+  if (e.target === this) this.classList.remove('open');
+});
+
+document.getElementById('btnFichadaEntrada').addEventListener('click', () => enviarFichada('entrada'));
+document.getElementById('btnFichadaSalida').addEventListener('click',  () => enviarFichada('salida'));
+
+async function enviarFichada(tipo) {
+  const numero  = document.getElementById('fichadaNumero').value.trim();
+  const errorEl = document.getElementById('fichadaError');
+  const btnE    = document.getElementById('btnFichadaEntrada');
+  const btnS    = document.getElementById('btnFichadaSalida');
+
+  if (!numero) {
+    errorEl.textContent   = 'Ingresá tu número de empleado';
+    errorEl.style.display = 'block';
+    document.getElementById('fichadaNumero').focus();
+    return;
+  }
+
+  errorEl.style.display = 'none';
+  btnE.disabled = btnS.disabled = true;
+  btnE.style.opacity = btnS.style.opacity = '0.6';
+
+  try {
+    const res  = await fetch('/321POS/public/fichada/registrar', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ numero_empleado: numero, tipo })
+    });
+    const data = await res.json();
+
+    if (!data.ok) {
+      errorEl.textContent   = data.error || 'Error al registrar';
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    mostrarResultadoFichada(data);
+
+  } catch(e) {
+    errorEl.textContent   = 'Error de conexión. Intentá de nuevo.';
+    errorEl.style.display = 'block';
+  } finally {
+    btnE.disabled = btnS.disabled = false;
+    btnE.style.opacity = btnS.style.opacity = '1';
+  }
+}
+
+function mostrarResultadoFichada(data) {
+  const { empleado, fichada } = data;
+
+  document.getElementById('fichadaFormState').style.display   = 'none';
+  document.getElementById('fichadaResultState').style.display = 'flex';
+  document.getElementById('fichadaResultIcon').textContent    = fichada.tipo === 'entrada' ? '🟢' : '🔴';
+  document.getElementById('fichadaResultNombre').textContent  = empleado.nombre;
+  document.getElementById('fichadaResultCargo').textContent   =
+    empleado.cargo ? empleado.cargo + ' · #' + empleado.numero : '#' + empleado.numero;
+
+  let detalle = '';
+  if (fichada.tipo === 'entrada') {
+    detalle = '<strong>ENTRADA</strong> registrada a las <strong>' + fichada.hora + '</strong><br>';
+    detalle += fichada.es_tardanza
+      ? '<span style="color:#e74c3c;">⚠️ Tardanza: ' + fichada.tardanza_min + ' minutos</span>'
+      : '<span style="color:#27ae60;">✅ En horario</span>';
+  } else {
+    detalle = '<strong>SALIDA</strong> registrada a las <strong>' + fichada.hora_salida + '</strong><br>';
+    detalle += 'Entrada: ' + fichada.hora_entrada + '<br>';
+    detalle += 'Tiempo trabajado: <strong>' + fichada.trabajado_texto + '</strong>';
+  }
+
+  document.getElementById('fichadaResultDetalle').innerHTML = detalle;
+  setTimeout(() => document.getElementById('modalFichada').classList.remove('open'), 5000);
+}
+</script>
+<!-- ══ MODAL EFECTIVO ══ -->
+<div class="modal-overlay" id="modalEfectivo">
+  <div class="modal modal-sm" style="max-width:380px;">
+    <div class="modal-header">
+      <h2>💵 Cobro en Efectivo</h2>
+      <button class="modal-close" id="closeEfectivo">✕</button>
+    </div>
+
+    <div style="padding:20px; display:flex; flex-direction:column; gap:15px;">
+      
+      <div style="text-align:center;">
+        <div style="font-size:12px;color:var(--muted);">TOTAL A COBRAR</div>
+        <div style="font-size:26px;font-weight:bold;">
+          $ <span id="efectivoTotal"></span>
+        </div>
+      </div>
+
+      <div>
+        <label class="field-label">Recibido</label>
+        <input type="number" id="efectivoRecibido" class="field-input"
+               placeholder="0.00" min="0" step="0.01">
+      </div>
+
+      <div style="text-align:right;">
+        <div style="font-size:12px;color:var(--muted);">VUELTO</div>
+        <div style="font-size:18px;font-weight:bold;color:var(--green-a);">
+          $ <span id="efectivoVuelto">0,00</span>
+        </div>
+      </div>
+
+      <button id="btnConfirmarEfectivo"
+        style="padding:12px;border:none;border-radius:6px;
+               background:var(--green-a);color:#fff;
+               font-weight:bold;cursor:pointer;opacity:.6;"
+        disabled>
+        Confirmar Cobro
+      </button>
+
+    </div>
+  </div>
+</div>
 </body>
 </html>
