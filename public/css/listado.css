@@ -1,0 +1,119 @@
+/* Contenedor general */
+.listado-container {
+    max-width: 1200px;
+    margin: 2rem auto;
+    padding: 1rem 2rem;
+    background-color: #fff;
+    border-radius: 12px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Header */
+.listado-header {
+    text-align: center;
+    padding: 1rem 0;
+    background: linear-gradient(135deg, #ff6b6b 0%, #ff3333 100%);
+    color: white;
+    border-radius: 12px 12px 0 0;
+}
+
+.listado-header h1 {
+    margin-bottom: 0.3rem;
+}
+
+/* Botón nuevo usuario */
+.listado-top-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin: 1rem 0;
+}
+
+.listado-btn {
+    text-decoration: none;
+    border: none;
+    border-radius: 6px;
+    padding: 0.6rem 1.2rem;
+    font-size: 0.95rem;
+    font-weight: bold;
+    cursor: pointer;
+    background-color: #1a1a1a;
+    color: white;
+    transition: 0.2s;
+}
+
+.listado-btn:hover {
+    background-color: #333;
+}
+
+.listado-btn-nuevo {
+    background-color: #28a745;
+}
+
+.listado-btn-nuevo:hover {
+    background-color: #218838;
+}
+
+/* Tabla */
+.listado-tabla-wrapper {
+    overflow-x: auto;
+}
+
+.listado-tabla {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+    margin-bottom: 2rem;
+}
+
+.listado-tabla th, .listado-tabla td {
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid #ddd;
+    text-align: left;
+}
+
+.listado-tabla th {
+    background-color: #f2f2f2;
+    font-weight: bold;
+}
+
+/* Acciones */
+.listado-acciones {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.listado-btn-mini {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.85rem;
+    background: #444;
+    color: white;
+    border-radius: 4px;
+    text-decoration: none;
+    border: none;
+    cursor: pointer;
+}
+
+.listado-btn-mini:hover {
+    background: #1a1a1a;
+}
+
+.listado-btn-eliminar {
+    background-color: #dc3545;
+}
+
+.listado-btn-eliminar:hover {
+    background-color: #a71d2a;
+}
+
+.producto-btn-nuevo {
+    background: linear-gradient(135deg, #FFD700 0%, #FFC300 100%);
+    color: #000;
+}
+
+/* Footer */
+.listado-footer {
+    text-align: center;
+    padding: 1rem 0;
+}
+

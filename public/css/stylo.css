@@ -1,0 +1,38 @@
+.hide {
+    display: none;
+}
+
+body {
+    font-size: 16px;
+    font-family: "Inter", sans-serif;
+}
+
+b {
+    font-weight: bold;
+}
+
+@-ms-viewport {
+    width: device-width;
+}
+
+@media (max-width: 768px) {
+    .nav-links {
+        display: none;
+    }
+    
+    .features-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .stat-item {
+        flex-direction: column;
+        text-align: center;
+    }
+}
+
+
+@media only screen and (max-width: 1366px) {
+    body {
+        font-size: 14px !important;
+    }
+}

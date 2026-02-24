@@ -1,0 +1,15 @@
+@import "reset.css";
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
+@import "grid.css";
+@import "nav.css";
+@import "footer.css";
+@import "menu.css";
+@import "login.css"; 
+@import "registro.css"; 
+@import "inicio.css";
+@import "cuenta.css";
+@import "stylo.css";
+@import "vistaCajero.css";
+@import "listado.css";
+@import "crud.css";
+@import "mesa.css";

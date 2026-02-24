@@ -1,0 +1,18 @@
+    public static function GenerarQRdecontactocliente($datosContacto, $directorio){
+    	require_once(APP_PATH.'librerias/php/phpqrcode/qrlib.php');
+
+		$nombre 	= $datosContacto['nombre'];
+		$telefono 	= $datosContacto['telefono'];
+		$email 		= $datosContacto['email'];
+		$direccion 	= $datosContacto['direccion'];
+		$id_Cliente = $datosContacto['id_cliente'];
+
+		$ruta_archivoNombre = $directorio.'/'.$id_Cliente.'qr.png';
+		// echo $ruta_archivoNombre."<hr>";
+
+		$contenido = "BEGIN:VCARD\nVERSION:3.0\nFN:$nombre\nTEL:$telefono\nEMAIL:$email\nADR:$direccion\nEND:VCARD";
+		$respuesta = \QRcode::png($contenido, $ruta_archivoNombre, QR_ECLEVEL_L, 10);
+		// var_dump($respuesta);
+    }
+
+
