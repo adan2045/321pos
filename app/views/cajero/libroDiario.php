@@ -170,6 +170,19 @@
         .planilla-botones .btn:hover {
             background: #333;
         }
+        .btn-cancelar{
+            margin-left:8px;
+             padding:2px 8px;
+             font-size:0.8rem;
+             border:none;
+             background:#b00000;
+             color:#fff;
+             border-radius:4px;
+             cursor:pointer;
+        }
+        .btn-cancelar:hover{
+            background:#ff0000;
+        }
 
         @media (max-width: 850px) {
             .planilla-libro {
@@ -213,45 +226,94 @@
                     <th>Hora</th>
                 </tr>
             </thead>
-            <tbody>
-                <?php foreach ($movimientos as $mov):
-                    // Clases por tipo: inicio=verde, gasto/caja fuerte=rojo, total=negro
-                    $trClass = '';
-                    if ($mov['tipo'] === 'inicio')
-                        $trClass = 'inicio';
-                    if (in_array($mov['tipo'], ['gasto', 'caja_fuerte']))
-                        $trClass = 'egreso';
-                    ?>
-                    <tr class="<?= $trClass ?>">
-                        <td>
-                            <?php if ($mov['tipo'] === 'venta' && !empty($mov['ticket_url'])): ?>
-                                <a href="<?= htmlspecialchars($mov['ticket_url']) ?>" target="_blank">
-                                    <?= htmlspecialchars($mov['detalle']) ?>
-                                </a>
-                            <?php else: ?>
-                                <?= htmlspecialchars($mov['detalle']) ?>
-                            <?php endif; ?>
-                        </td>
-                        <td>
-                            <?= ($mov['efectivo'] !== '' ? number_format($mov['efectivo'], 0, '', '.') : '') ?>
-                        </td>
-                        <td>
-                            <?= ($mov['tarjeta'] !== '' ? number_format($mov['tarjeta'], 0, '', '.') : '') ?>
-                        </td>
-                        <td>
-                            <?= ($mov['qr'] !== '' ? number_format($mov['qr'], 0, '', '.') : '') ?>
-                        </td>
-                        <td>
-                            <?= ($mov['mp'] !== '' ? number_format($mov['mp'], 0, '', '.') : '') ?>
-                        </td>
-                        <td>
-                            <?= ($mov['total'] !== '' ? number_format($mov['total'], 0, '', '.') : '') ?>
-                        </td>
-                        <td><?= $mov['mesa'] ?></td>
-                        <td><?= date('H:i', strtotime($mov['fecha_hora'])) ?></td>
-                    </tr>
-                <?php endforeach; ?>
-            </tbody>
+           <tbody>
+<?php foreach ($movimientos as $mov): 
+
+    // Clase visual por tipo
+    $trClass = '';
+
+    if ($mov['tipo'] === 'inicio') {
+        $trClass = 'inicio';
+    }
+
+    if (in_array($mov['tipo'], ['gasto', 'retiro', 'nota_credito', 'ajuste_metodo'])) {
+        $trClass = 'egreso';
+    }
+
+    $esVenta = ($mov['tipo'] === 'venta');
+?>
+
+<tr class="<?= $trClass ?>">
+
+    <!-- DETALLE -->
+    <td>
+
+        <?php if ($esVenta && !empty($mov['ticket_url'])): ?>
+
+            <a href="<?= htmlspecialchars($mov['ticket_url']) ?>" target="_blank">
+                <?= htmlspecialchars($mov['detalle']) ?>
+            </a>
+
+            <!-- BOTÓN CANCELAR -->
+            <button 
+                class="btn-cancelar"
+                data-ticket="<?= $mov['numero_ticket'] ?>">
+                Cancelar
+            </button>
+
+        <?php else: ?>
+
+            <?= htmlspecialchars($mov['detalle']) ?>
+
+        <?php endif; ?>
+
+    </td>
+
+    <!-- EFECTIVO -->
+    <td>
+        <?= ($mov['efectivo'] !== '' 
+            ? number_format($mov['efectivo'], 0, '', '.') 
+            : '') ?>
+    </td>
+
+    <!-- TARJETA -->
+    <td>
+        <?= ($mov['tarjeta'] !== '' 
+            ? number_format($mov['tarjeta'], 0, '', '.') 
+            : '') ?>
+    </td>
+
+    <!-- QR -->
+    <td>
+        <?= ($mov['qr'] !== '' 
+            ? number_format($mov['qr'], 0, '', '.') 
+            : '') ?>
+    </td>
+
+    <!-- MERCADOPAGO -->
+    <td>
+        <?= ($mov['mp'] !== '' 
+            ? number_format($mov['mp'], 0, '', '.') 
+            : '') ?>
+    </td>
+
+    <!-- TOTAL -->
+    <td>
+        <?= ($mov['total'] !== '' 
+            ? number_format($mov['total'], 0, '', '.') 
+            : '') ?>
+    </td>
+
+    <!-- MESA -->
+    <td><?= $mov['mesa'] ?? '' ?></td>
+
+    <!-- HORA -->
+    <td><?= date('H:i', strtotime($mov['fecha_hora'])) ?></td>
+
+</tr>
+
+<?php endforeach; ?>
+</tbody>
             <tfoot>
                 <tr class="total">
                     <td><b>Totales</b></td>
@@ -268,6 +330,107 @@
             <button onclick="window.print()" class="btn">Imprimir</button>
         </div>
     </div>
+    <!-- ═════ MODAL CANCELAR TICKET ═════ -->
+<div id="modalCancelar" style="
+    display:none;
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,.55);
+    z-index:99999;
+    align-items:center;
+    justify-content:center;
+">
+    <div style="
+        background:#fff;
+        width:360px;
+        padding:22px;
+        border-radius:10px;
+        box-shadow:0 15px 50px rgba(0,0,0,.3);
+        display:flex;
+        flex-direction:column;
+        gap:14px;
+    ">
+        <h3 style="margin:0;">Cancelar Ticket</h3>
+
+        <div id="cancelTicketInfo" style="font-size:14px;color:#555;"></div>
+
+        <input type="password"
+               id="cancelPassword"
+               placeholder="Contraseña de supervisor"
+               style="padding:8px;border:1px solid #ccc;border-radius:6px;">
+
+        <div style="display:flex;justify-content:flex-end;gap:10px;">
+            <button id="btnCerrarCancel"
+                    style="padding:6px 12px;border:1px solid #aaa;background:#fff;border-radius:6px;cursor:pointer;">
+                Cerrar
+            </button>
+
+            <button id="btnConfirmarCancel"
+                    style="padding:6px 14px;background:#d10808;color:#fff;border:none;border-radius:6px;cursor:pointer;">
+                Confirmar
+            </button>
+        </div>
+    </div>
+</div>
+<script>
+
+let ticketACancelar = null;
+
+// Abrir modal
+document.querySelectorAll('.btn-cancelar').forEach(btn => {
+
+    btn.addEventListener('click', function(){
+
+        ticketACancelar = this.dataset.ticket;
+
+        document.getElementById('cancelTicketInfo').innerText =
+            "Ticket: #" + ticketACancelar;
+
+        document.getElementById('cancelPassword').value = '';
+
+        document.getElementById('modalCancelar').style.display = 'flex';
+    });
+
+});
+
+// Cerrar
+document.getElementById('btnCerrarCancel').addEventListener('click', function(){
+    document.getElementById('modalCancelar').style.display = 'none';
+});
+
+// Confirmar
+document.getElementById('btnConfirmarCancel').addEventListener('click', function(){
+
+    const pass = document.getElementById('cancelPassword').value.trim();
+
+    if(!pass){
+        alert("Ingresá la contraseña");
+        return;
+    }
+
+    fetch('/321POS/public/cajero/cancelarTicket', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+            ticket: ticketACancelar,
+            password: pass
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+
+        if(data.status === 'ok'){
+            alert("Ticket cancelado correctamente");
+            location.reload();
+        } else {
+            alert("Error: " + data.message);
+        }
+
+    });
+
+});
+
+</script>
 </body>
 
 </html>

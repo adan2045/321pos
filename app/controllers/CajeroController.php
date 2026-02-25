@@ -56,7 +56,7 @@ class CajeroController extends Controller {
             "pedidos" => $pedidos
         ]);
     }
-
+    
     public function actionPagarMesa()
     {
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mesa_id'])) {
@@ -84,6 +84,77 @@ class CajeroController extends Controller {
             echo 'error';
         }
     }
+    public function actionCancelarTicket()
+{
+    header('Content-Type: application/json');
+
+    $db = \DataBase::getInstance();
+    $conn = $db->getConnection();
+
+    try {
+
+        $data = json_decode(file_get_contents("php://input"), true);
+
+        $ticket = $data['ticket'];
+        $password = $data['password'];
+
+        // 🔐 validar contraseña (ejemplo simple)
+        if ($password !== "1234") {
+            throw new \Exception("Contraseña incorrecta");
+        }
+
+        $conn->beginTransaction();
+
+        // Buscar pedido
+        $stmt = $conn->prepare("SELECT * FROM pedidos WHERE numero_ticket = ?");
+        $stmt->execute([$ticket]);
+        $pedido = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        if (!$pedido) {
+            throw new \Exception("Ticket no encontrado");
+        }
+
+        if ($pedido['estado'] === 'cancelado') {
+            throw new \Exception("El ticket ya está cancelado");
+        }
+
+        // Marcar pedido cancelado
+        $upd = $conn->prepare("UPDATE pedidos SET estado='cancelado' WHERE id=?");
+        $upd->execute([$pedido['id']]);
+
+        // Insertar movimiento negativo
+        $stmtMov = $conn->prepare("
+            INSERT INTO movimientos_caja
+            (tipo, detalle, efectivo, tarjeta, qr, mp, total, fecha_hora)
+            VALUES
+            ('nota_credito', ?, ?, ?, ?, ?, ?, NOW())
+        ");
+
+        $stmtMov->execute([
+            "Nota crédito Ticket #" . $ticket,
+            -$pedido['efectivo'],
+            -$pedido['tarjeta'],
+            -$pedido['qr'],
+            -$pedido['mp'],
+            -$pedido['total']
+        ]);
+
+        $conn->commit();
+
+        echo json_encode(["status"=>"ok"]);
+
+    } catch (\Exception $e) {
+
+        if ($conn->inTransaction()) {
+            $conn->rollBack();
+        }
+
+        echo json_encode([
+            "status"=>"error",
+            "message"=>$e->getMessage()
+        ]);
+    }
+}
 
     public function actionRegistrarGasto()
     {
@@ -420,9 +491,12 @@ class CajeroController extends Controller {
             $fechaApertura = $row['fecha_apertura'] ?? '';
         }
 
-        $stmt = $db->prepare("SELECT p.id, p.total, p.metodo_pago, p.mesa_id, p.fecha
-            FROM pedidos p WHERE p.caja_id = ? AND p.cerrado = 1");
-        $stmt->execute([$cajaId]);
+        $stmt = $db->prepare("
+        SELECT p.id, p.total, p.metodo_pago, p.mesa_id, p.fecha_cierre
+        FROM pedidos p
+        WHERE DATE(p.fecha_cierre) = ?
+        ");
+        $stmt->execute([$fechaSeleccionada]);
         $ventas = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
         $stmt = $db->prepare("SELECT id, monto, motivo, autorizado_por, fecha FROM gastos WHERE caja_id = ?");
@@ -464,26 +538,25 @@ class CajeroController extends Controller {
         ];
 
         foreach ($ventas as $v) {
-            $detalle = "TICKET #" . str_pad($v['id'], 4, '0', STR_PAD_LEFT);
-            $metodo = strtolower($v['metodo_pago']);
-            $movimientos[] = [
-                'tipo' => 'venta',
-                'detalle' => $detalle,
-                'efectivo' => $metodo=='efectivo' ? $v['total'] : '',
-                'tarjeta' => $metodo=='tarjeta' ? $v['total'] : '',
-                'qr' => $metodo=='qr' ? $v['total'] : '',
-                'mp' => $metodo=='mercadopago' ? $v['total'] : '',
-                'total' => $v['total'],
-                'mesa' => $getNumeroMesa($v['mesa_id']),
-                'fecha_hora' => date('Y-m-d H:i', strtotime($v['fecha'])),
-                'clase_efectivo' => $metodo=='efectivo' ? 'venta' : '',
-                'clase_tarjeta' => $metodo=='tarjeta' ? 'venta' : '',
-                'clase_qr' => $metodo=='qr' ? 'venta' : '',
-                'clase_mp' => $metodo=='mercadopago' ? 'venta' : '',
-                'clase_total' => 'venta',
-                'ticket_url' => '/321POS/cajero/cuenta?id=' . $v['id']
-            ];
-        }
+
+    $numeroTicket = str_pad($v['id'], 4, '0', STR_PAD_LEFT);
+    $detalle = "TICKET #" . $numeroTicket;
+    $metodo = strtolower($v['metodo_pago']);
+
+    $movimientos[] = [
+        'tipo' => 'venta',
+        'detalle' => $detalle,
+        'numero_ticket' => $v['id'],   // 👈 ESTA LÍNEA ES LA CLAVE
+        'efectivo' => $metodo=='efectivo' ? $v['total'] : '',
+        'tarjeta' => $metodo=='tarjeta' ? $v['total'] : '',
+        'qr' => $metodo=='qr' ? $v['total'] : '',
+        'mp' => $metodo=='mercadopago' ? $v['total'] : '',
+        'total' => $v['total'],
+        'mesa' => $getNumeroMesa($v['mesa_id']),
+        'fecha_hora' => date('Y-m-d H:i', strtotime($v['fecha_cierre'])),
+        'ticket_url' => '/321POS/public/cajero/cuenta?id=' . $v['id']
+    ];
+}
 
         foreach ($cajaFuerte as $cf) {
             $movimientos[] = [

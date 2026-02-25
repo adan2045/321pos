@@ -127,6 +127,21 @@ class PosController extends Controller
             $total
         ]);
 
+        // 4️⃣ Registrar movimiento de caja (VENTA)
+        $stmtMov = $conn->prepare("
+           INSERT INTO movimientos_caja
+            (caja_id, tipo, referencia_id, numero_ticket, descripcion, metodo_pago, ingreso, egreso)
+          VALUES (?, 'venta', ?, ?, ?, ?, ?, 0)
+        ");
+
+        $stmtMov->execute([
+        $caja_id,
+        $pedido_id,
+        $pedido_id, // usamos id como número de ticket por ahora
+        "Venta Ticket #".$pedido_id,
+        $data['metodo'],
+        $total
+        ]);
         $conn->commit();
 
         echo json_encode(["status" => "ok"]);
