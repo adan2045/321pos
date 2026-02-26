@@ -80,6 +80,11 @@
             background: #eaffed !important;
             font-weight: bold;
         }
+                .planilla-movimientos tr.caja-fuerte td{
+        color:#0046a7 !important;
+        background:#eef4ff !important;
+        font-weight:bold;
+        }
 
         /* Fila gasto o caja fuerte: todo rojo */
         .planilla-movimientos tr.egreso td {
@@ -239,8 +244,10 @@
                     $trClass = '';
                     if ($mov['tipo'] === 'inicio')
                         $trClass = 'inicio';
-                    if (in_array($mov['tipo'], ['gasto', 'caja_fuerte']))
-                        $trClass = 'egreso';
+                    $trClass = '';
+                    if ($mov['tipo'] === 'inicio') $trClass = 'inicio';
+                    if ($mov['tipo'] === 'gasto') $trClass = 'egreso';
+                    if ($mov['tipo'] === 'caja_fuerte') $trClass = 'caja-fuerte';
                     ?>
                     <tr class="<?= $trClass ?>">
                         <td>

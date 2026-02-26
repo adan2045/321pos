@@ -36,9 +36,7 @@ $cajaIdSesion = $_SESSION['caja_id'] ?? '';
 <!-- ===================== -->
 <!-- MODAL: GASTO / EGRESO -->
 <!-- ===================== -->
-<!-- ===================== -->
-<!-- MODAL: GASTO / EGRESO -->
-<!-- ===================== -->
+
 <div id="gastoModal" class="modal-backdrop" style="display:none;">
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="gastoTitle">
     <div class="modal-head">
@@ -74,6 +72,7 @@ $cajaIdSesion = $_SESSION['caja_id'] ?? '';
   </div>
 </div>
 
+
 <!-- ===================== -->
 <!-- MODAL: CAJA FUERTE -->
 <!-- ===================== -->
@@ -87,6 +86,7 @@ $cajaIdSesion = $_SESSION['caja_id'] ?? '';
     <!-- Tu controller exige: monto, responsable, caja_id -->
     <form method="POST" action="<?= $ruta ?>/cajero/registrarCajaFuerte" class="modal-body">
       <input type="hidden" name="caja_id" value="<?= htmlspecialchars($cajaIdSesion) ?>">
+      <input type="hidden" name="redirect" value="<?= $ruta ?>/pos">
 
       <div class="modal-row">
         <label class="modal-label">Monto</label>

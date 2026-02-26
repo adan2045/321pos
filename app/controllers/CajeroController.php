@@ -357,7 +357,8 @@ class CajeroController extends Controller {
                 $stmt = $db->prepare("INSERT INTO caja_fuerte (fecha, monto, responsable, caja_id) VALUES (NOW(), ?, ?, ?)");
                 $stmt->execute([$monto, $responsable, $caja_id]);
 
-                header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
+                $redirect = $_POST['redirect'] ?? (\App::baseUrl() . "/pos");
+                header("Location: " . $redirect);
                 exit;
             } else {
                 $_SESSION['mensaje_error'] = "Faltan datos obligatorios para registrar el movimiento de Caja Fuerte.";
