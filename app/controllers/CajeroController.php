@@ -86,31 +86,72 @@ class CajeroController extends Controller {
     }
 
     public function actionRegistrarGasto()
-    {
-        if (session_status() === PHP_SESSION_NONE) session_start();
+{
+    if (session_status() === PHP_SESSION_NONE) session_start();
 
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $motivo = trim($_POST['motivo'] ?? '');
-            $monto = floatval($_POST['monto'] ?? 0);
-            $autorizado_por = trim($_POST['autorizado_por'] ?? '');
-            $usuario_id = $_SESSION['user_id'] ?? null;
+    // Helpers de salida (para POS)
+    $redirect  = $_POST['redirect'] ?? null;
+    $aceptaJson = (strpos($_SERVER['HTTP_ACCEPT'] ?? '', 'application/json') !== false);
+    $esAjax     = (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest');
 
-            // ✅ Mejor: caja_id desde POST o desde sesión
-            $caja_id = $_POST['caja_id'] ?? ($_SESSION['caja_id'] ?? null);
-
-            if ($motivo !== '' && $monto > 0 && $autorizado_por !== '' && !empty($caja_id)) {
-                $db = \DataBase::getInstance()->getConnection();
-                $stmt = $db->prepare("INSERT INTO gastos (fecha, monto, motivo, autorizado_por, usuario_id, caja_id) VALUES (NOW(), ?, ?, ?, ?, ?)");
-                $stmt->execute([$monto, $motivo, $autorizado_por, $usuario_id, $caja_id]);
-
-                header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
-                exit;
-            } else {
-                echo "<script>alert('Faltan datos obligatorios para registrar el gasto'); window.history.back();</script>";
-                exit;
-            }
-        }
+    // Solo POST
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        if ($redirect) { header("Location: " . $redirect); exit; }
+        header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
+        exit;
     }
+
+    $motivo         = trim($_POST['motivo'] ?? '');
+    $monto          = floatval($_POST['monto'] ?? 0);
+    $autorizado_por = trim($_POST['autorizado_por'] ?? '');
+
+    $db = \DataBase::getInstance()->getConnection();
+
+    // Usuario (modo dev sin login => NULL)
+    $usuario_id = null;
+    if (!empty($_SESSION['user_id']) && is_numeric($_SESSION['user_id'])) {
+        $usuario_id = (int)$_SESSION['user_id'];
+        $chk = $db->prepare("SELECT id FROM usuarios WHERE id = ? LIMIT 1");
+        $chk->execute([$usuario_id]);
+        if (!$chk->fetchColumn()) $usuario_id = null;
+    }
+
+    // Caja id
+    $caja_id = $_POST['caja_id'] ?? ($_SESSION['caja_id'] ?? null);
+
+    if ($motivo === '' || $monto <= 0 || $autorizado_por === '' || empty($caja_id)) {
+        if ($aceptaJson || $esAjax) {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['status' => 'error', 'message' => 'Faltan datos obligatorios para registrar el gasto']);
+            exit;
+        }
+        echo "<script>alert('Faltan datos obligatorios para registrar el gasto'); window.history.back();</script>";
+        exit;
+    }
+
+    // Insert gasto
+    $stmt = $db->prepare("
+        INSERT INTO gastos (fecha, monto, motivo, autorizado_por, usuario_id, caja_id)
+        VALUES (NOW(), ?, ?, ?, ?, ?)
+    ");
+    $stmt->execute([$monto, $motivo, $autorizado_por, $usuario_id, $caja_id]);
+
+    // ✅ Respuesta según contexto
+    if ($aceptaJson || $esAjax) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['status' => 'ok']);
+        exit;
+    }
+
+    if ($redirect) {
+        header("Location: " . $redirect);
+        exit;
+    }
+
+    // fallback histórico
+    header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
+    exit;
+}
 
     public function actionCuentaMesa()
     {
