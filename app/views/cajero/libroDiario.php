@@ -408,7 +408,7 @@ document.getElementById('btnConfirmarCancel').addEventListener('click', function
         return;
     }
 
-    fetch('/321POS/public/cajero/cancelarTicket', {
+    fetch('<?= $ruta ?>/cajero/cancelarTicket', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({

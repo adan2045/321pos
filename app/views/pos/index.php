@@ -432,7 +432,7 @@
   }
 </style>
 </head>
-<body>
+<body data-base="<?= htmlspecialchars(rtrim($ruta ?? '/321POS/public','/')) ?>">
 
 <div class="header">
   <div class="header-left"><span class="rocket">🚀</span> POS Mostrador</div>
@@ -523,7 +523,7 @@
     <div class="products-grid" id="productosGrid"></div>
 
     <div class="right-panel-footer">
-      <a class="ubtn planilla" id="btnPlanilla" href="/321POS/public/planilla/pos" style="text-decoration:none;">
+      <a class="ubtn planilla" id="btnPlanilla" href="<?= $ruta ?>/planilla/pos" style="text-decoration:none;">
         <span class="icon">📋</span>Planilla de Caja
       </a>
     </div>
@@ -604,6 +604,10 @@
 <?php include __DIR__ . '/../partials/gestion.modals.php'; ?>
 
 <script>
+// Base URL del proyecto (evita hardcodear "/321POS/public" y no depende de PHP en JS)
+const BASE = (document.body?.dataset?.base || '').replace(/\/$/, '');
+const url  = (path) => `${BASE}/${String(path || '').replace(/^\//, '')}`;
+
 // ---------- DB DEMO ----------
 const productosDB = {
   1001:{nombre:'☕ Café Americano',precio:1500},1002:{nombre:'🥛 Capuchino',precio:1900},
@@ -874,7 +878,7 @@ window.addEventListener('load', function() {
 
   btnConfirmarEfectivo.addEventListener('click', function(){
 
-    fetch('/321POS/public/pos/guardarPedido', {
+    fetch(url('pos/guardarPedido'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -904,7 +908,7 @@ window.addEventListener('load', function() {
 // ---------- Historial ----------
 document.getElementById('btnHistorial')?.addEventListener('click', (e) => {
   e.preventDefault();
-  openOverlay("/321POS/public/cajero/libroDiario"); // Movimientos reales
+  openOverlay(url('cajero/libroDiario')); // Movimientos reales
 });
 document.getElementById('closeHistorial').addEventListener('click', () =>
   document.getElementById('modalHistorial').classList.remove('open')
@@ -1118,7 +1122,7 @@ function openOverlay(url){
 function openPlanilla(){
   const overlay = document.getElementById('planillaOverlay');
   const frame = document.getElementById('planillaFrame');
-  frame.src = "/321POS/public/planilla/pos";
+  frame.src = url('planilla/pos');
   overlay.style.display = "flex";
 }
 function closePlanilla(){
@@ -1163,7 +1167,7 @@ renderTicket();
 // ===== btnHistorial -> abrir Libro Diario en overlay =====
 document.getElementById('btnHistorial')?.addEventListener('click', (e) => {
   e.preventDefault();
-  openOverlay("/321POS/public/cajero/libroDiario");
+  openOverlay(url('cajero/libroDiario'));
 });
 </script>
 <!-- ══════════════════════════════════════════════════════════
@@ -1261,7 +1265,7 @@ async function enviarFichada(tipo) {
   btnE.style.opacity = btnS.style.opacity = '0.6';
 
   try {
-    const res  = await fetch('/321POS/public/fichada/registrar', {
+    const res  = await fetch(url('fichada/registrar'), {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ numero_empleado: numero, tipo })

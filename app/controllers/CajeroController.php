@@ -106,7 +106,7 @@ class CajeroController extends Controller {
         $conn->beginTransaction();
 
         // Buscar pedido
-        $stmt = $conn->prepare("SELECT * FROM pedidos WHERE numero_ticket = ?");
+        $stmt = $conn->prepare("SELECT * FROM pedidos WHERE id = ?");
         $stmt->execute([$ticket]);
         $pedido = $stmt->fetch(\PDO::FETCH_ASSOC);
 
@@ -124,20 +124,19 @@ class CajeroController extends Controller {
 
         // Insertar movimiento negativo
         $stmtMov = $conn->prepare("
-            INSERT INTO movimientos_caja
-            (tipo, detalle, efectivo, tarjeta, qr, mp, total, fecha_hora)
-            VALUES
-            ('nota_credito', ?, ?, ?, ?, ?, ?, NOW())
-        ");
+        INSERT INTO movimientos_caja
+        (caja_id, tipo, referencia_id, numero_ticket, descripcion, metodo_pago, ingreso, egreso, fecha)
+        VALUES (?, 'nota_credito', ?, ?, ?, ?, 0, ?, NOW())
+    ");
 
-        $stmtMov->execute([
-            "Nota crédito Ticket #" . $ticket,
-            -$pedido['efectivo'],
-            -$pedido['tarjeta'],
-            -$pedido['qr'],
-            -$pedido['mp'],
-            -$pedido['total']
-        ]);
+$stmtMov->execute([
+    $_SESSION['caja_id'] ?? null,
+    $pedido['id'],
+    $pedido['id'],
+    "Nota crédito Ticket #" . $pedido['id'],
+    $pedido['metodo_pago'],
+    $pedido['total']
+]);
 
         $conn->commit();
 
@@ -470,6 +469,8 @@ class CajeroController extends Controller {
     public function actionLibroDiario()
     {
         if (session_status() === PHP_SESSION_NONE) session_start();
+        // Base path para construir URLs sin hardcodear "/321POS/public"
+        $ruta = static::path();
         $db = \DataBase::getInstance()->getConnection();
 
         $cajaId = $_SESSION['caja_id'] ?? null;
@@ -498,6 +499,16 @@ class CajeroController extends Controller {
         ");
         $stmt->execute([$fechaSeleccionada]);
         $ventas = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        // 🔴 Leer notas de crédito y otros movimientos manuales
+        $stmt = $db->prepare("
+         SELECT *
+        FROM movimientos_caja
+        WHERE DATE(fecha) = ?
+        AND tipo = 'nota_credito'
+    ");
+        $stmt->execute([$fechaSeleccionada]);
+        $notasCredito = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
         $stmt = $db->prepare("SELECT id, monto, motivo, autorizado_por, fecha FROM gastos WHERE caja_id = ?");
         $stmt->execute([$cajaId]);
@@ -546,7 +557,7 @@ class CajeroController extends Controller {
     $movimientos[] = [
         'tipo' => 'venta',
         'detalle' => $detalle,
-        'numero_ticket' => $v['id'],   // 👈 ESTA LÍNEA ES LA CLAVE
+        'numero_ticket' => $v['id'],   
         'efectivo' => $metodo=='efectivo' ? $v['total'] : '',
         'tarjeta' => $metodo=='tarjeta' ? $v['total'] : '',
         'qr' => $metodo=='qr' ? $v['total'] : '',
@@ -555,6 +566,22 @@ class CajeroController extends Controller {
         'mesa' => $getNumeroMesa($v['mesa_id']),
         'fecha_hora' => date('Y-m-d H:i', strtotime($v['fecha_cierre'])),
         'ticket_url' => '/321POS/public/cajero/cuenta?id=' . $v['id']
+    ];
+}
+    foreach ($notasCredito as $nc) {
+
+    $movimientos[] = [
+        'tipo' => 'nota_credito',
+        'detalle' => $nc['descripcion'],
+        'numero_ticket' => $nc['numero_ticket'],
+        'efectivo' => $nc['metodo_pago'] == 'efectivo' ? -$nc['egreso'] : '',
+        'tarjeta' => $nc['metodo_pago'] == 'tarjeta' ? -$nc['egreso'] : '',
+        'qr' => $nc['metodo_pago'] == 'qr' ? -$nc['egreso'] : '',
+        'mp' => $nc['metodo_pago'] == 'mercadopago' ? -$nc['egreso'] : '',
+        'total' => -$nc['egreso'],
+        'mesa' => '',
+        'fecha_hora' => date('Y-m-d H:i', strtotime($nc['fecha'])),
+        'ticket_url' => ''
     ];
 }
 
