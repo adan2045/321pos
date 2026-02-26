@@ -433,6 +433,10 @@ $ultimoCierre = method_exists($modeloCaja, 'obtenerUltimoCierre') ? $modeloCaja-
                     <input type="number" name="monto" class="form-control" required>
                 </div>
                 <div class="form-group full-width">
+                    <label class="form-label">Motivo</label>
+                    <input type="text" name="motivo" class="form-control" placeholder="Ej: retiro excedente / seguridad" required>
+                </div>
+                <div class="form-group full-width">
                     <label class="form-label">Responsable</label>
                     <input type="text" name="responsable" class="form-control" required>
                 </div>

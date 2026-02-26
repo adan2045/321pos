@@ -106,6 +106,22 @@
             margin-top: 9px;
         }
 
+        .btn-cerrar {
+            padding: 8px 18px;
+            border: none;
+            border-radius: 8px;
+            background: #111;
+            color: #fff;
+            font-size: 1rem;
+            cursor: pointer;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .btn-cerrar:hover {
+            background: #333;
+        }
+
         .planilla-botones .btn {
             padding: 6px 25px;
             border: none;
@@ -170,19 +186,6 @@
         .planilla-botones .btn:hover {
             background: #333;
         }
-        .btn-cancelar{
-            margin-left:8px;
-             padding:2px 8px;
-             font-size:0.8rem;
-             border:none;
-             background:#b00000;
-             color:#fff;
-             border-radius:4px;
-             cursor:pointer;
-        }
-        .btn-cancelar:hover{
-            background:#ff0000;
-        }
 
         @media (max-width: 850px) {
             .planilla-libro {
@@ -209,10 +212,15 @@
     <div class="planilla-libro">
         <div class="planilla-encabezado">
             <h1 class="titulo-mov">Movimientos del Día</h1>
-            <div class="planilla-dia">
-                <?= date('d/m/Y') ?>
+
+            <div style="display:flex; gap:12px; align-items:center; justify-content:flex-end; flex-wrap:wrap;">
+                <div class="planilla-dia">
+                    <?= date('d/m/Y') ?>
+                </div>
+                <button type="button" class="btn-cerrar" onclick="cerrarLibroDiario()">Cerrar</button>
             </div>
         </div>
+
         <table class="planilla-movimientos">
             <thead>
                 <tr>
@@ -226,94 +234,34 @@
                     <th>Hora</th>
                 </tr>
             </thead>
-           <tbody>
-<?php foreach ($movimientos as $mov): 
 
-    // Clase visual por tipo
-    $trClass = '';
+            <tbody>
+                <?php foreach ($movimientos as $mov):
+                    $trClass = '';
+                    if ($mov['tipo'] === 'inicio') $trClass = 'inicio';
+                    if (in_array($mov['tipo'], ['gasto', 'caja_fuerte'])) $trClass = 'egreso';
+                ?>
+                    <tr class="<?= $trClass ?>">
+                        <td>
+                            <?php if ($mov['tipo'] === 'venta' && !empty($mov['ticket_url'])): ?>
+                                <a href="<?= htmlspecialchars($mov['ticket_url']) ?>" target="_blank">
+                                    <?= htmlspecialchars($mov['detalle']) ?>
+                                </a>
+                            <?php else: ?>
+                                <?= htmlspecialchars($mov['detalle']) ?>
+                            <?php endif; ?>
+                        </td>
+                        <td><?= ($mov['efectivo'] !== '' ? number_format($mov['efectivo'], 0, '', '.') : '') ?></td>
+                        <td><?= ($mov['tarjeta'] !== '' ? number_format($mov['tarjeta'], 0, '', '.') : '') ?></td>
+                        <td><?= ($mov['qr'] !== '' ? number_format($mov['qr'], 0, '', '.') : '') ?></td>
+                        <td><?= ($mov['mp'] !== '' ? number_format($mov['mp'], 0, '', '.') : '') ?></td>
+                        <td><?= ($mov['total'] !== '' ? number_format($mov['total'], 0, '', '.') : '') ?></td>
+                        <td><?= $mov['mesa'] ?></td>
+                        <td><?= date('H:i', strtotime($mov['fecha_hora'])) ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
 
-    if ($mov['tipo'] === 'inicio') {
-        $trClass = 'inicio';
-    }
-
-    if (in_array($mov['tipo'], ['gasto', 'retiro', 'nota_credito', 'ajuste_metodo'])) {
-        $trClass = 'egreso';
-    }
-
-    $esVenta = ($mov['tipo'] === 'venta');
-?>
-
-<tr class="<?= $trClass ?>">
-
-    <!-- DETALLE -->
-    <td>
-
-        <?php if ($esVenta && !empty($mov['ticket_url'])): ?>
-
-            <a href="<?= htmlspecialchars($mov['ticket_url']) ?>" target="_blank">
-                <?= htmlspecialchars($mov['detalle']) ?>
-            </a>
-
-            <!-- BOTÓN CANCELAR -->
-            <button 
-                class="btn-cancelar"
-                data-ticket="<?= $mov['numero_ticket'] ?>">
-                Cancelar
-            </button>
-
-        <?php else: ?>
-
-            <?= htmlspecialchars($mov['detalle']) ?>
-
-        <?php endif; ?>
-
-    </td>
-
-    <!-- EFECTIVO -->
-    <td>
-        <?= ($mov['efectivo'] !== '' 
-            ? number_format($mov['efectivo'], 0, '', '.') 
-            : '') ?>
-    </td>
-
-    <!-- TARJETA -->
-    <td>
-        <?= ($mov['tarjeta'] !== '' 
-            ? number_format($mov['tarjeta'], 0, '', '.') 
-            : '') ?>
-    </td>
-
-    <!-- QR -->
-    <td>
-        <?= ($mov['qr'] !== '' 
-            ? number_format($mov['qr'], 0, '', '.') 
-            : '') ?>
-    </td>
-
-    <!-- MERCADOPAGO -->
-    <td>
-        <?= ($mov['mp'] !== '' 
-            ? number_format($mov['mp'], 0, '', '.') 
-            : '') ?>
-    </td>
-
-    <!-- TOTAL -->
-    <td>
-        <?= ($mov['total'] !== '' 
-            ? number_format($mov['total'], 0, '', '.') 
-            : '') ?>
-    </td>
-
-    <!-- MESA -->
-    <td><?= $mov['mesa'] ?? '' ?></td>
-
-    <!-- HORA -->
-    <td><?= date('H:i', strtotime($mov['fecha_hora'])) ?></td>
-
-</tr>
-
-<?php endforeach; ?>
-</tbody>
             <tfoot>
                 <tr class="total">
                     <td><b>Totales</b></td>
@@ -326,111 +274,80 @@
                 </tr>
             </tfoot>
         </table>
+
         <div class="planilla-botones">
             <button onclick="window.print()" class="btn">Imprimir</button>
         </div>
     </div>
-    <!-- ═════ MODAL CANCELAR TICKET ═════ -->
-<div id="modalCancelar" style="
-    display:none;
-    position:fixed;
-    inset:0;
-    background:rgba(0,0,0,.55);
-    z-index:99999;
-    align-items:center;
-    justify-content:center;
-">
-    <div style="
-        background:#fff;
-        width:360px;
-        padding:22px;
-        border-radius:10px;
-        box-shadow:0 15px 50px rgba(0,0,0,.3);
-        display:flex;
-        flex-direction:column;
-        gap:14px;
-    ">
-        <h3 style="margin:0;">Cancelar Ticket</h3>
 
-        <div id="cancelTicketInfo" style="font-size:14px;color:#555;"></div>
+    <script>
+        function cerrarLibroDiario() {
+            // Caso real: embebido dentro del POS (iframe dentro de un overlay).
+            try {
+                const p = window.parent;
+                if (p && p !== window && p.document) {
 
-        <input type="password"
-               id="cancelPassword"
-               placeholder="Contraseña de supervisor"
-               style="padding:8px;border:1px solid #ccc;border-radius:6px;">
+                    // 1) Encontrar EL iframe que muestra esta página, en el documento padre
+                    const iframes = p.document.querySelectorAll('iframe');
+                    for (const ifr of iframes) {
+                        if (ifr && ifr.contentWindow === window) {
 
-        <div style="display:flex;justify-content:flex-end;gap:10px;">
-            <button id="btnCerrarCancel"
-                    style="padding:6px 12px;border:1px solid #aaa;background:#fff;border-radius:6px;cursor:pointer;">
-                Cerrar
-            </button>
+                            // 2) Subir por el DOM hasta encontrar el contenedor overlay/modal y ocultarlo
+                            let node = ifr;
+                            while (node && node !== p.document.body) {
+                                const cs = p.getComputedStyle(node);
+                                const cls = (node.className || '').toString().toLowerCase();
 
-            <button id="btnConfirmarCancel"
-                    style="padding:6px 14px;background:#d10808;color:#fff;border:none;border-radius:6px;cursor:pointer;">
-                Confirmar
-            </button>
-        </div>
-    </div>
-</div>
-<script>
+                                const pintaOverlay =
+                                    cs.position === 'fixed' ||
+                                    cs.position === 'absolute' ||
+                                    cls.includes('modal') ||
+                                    cls.includes('overlay') ||
+                                    cls.includes('backdrop');
 
-let ticketACancelar = null;
+                                if (pintaOverlay) {
+                                    node.style.display = 'none';
+                                    // limpiar iframe para que no quede "pantalla blanca" si vuelve a mostrar
+                                    ifr.src = 'about:blank';
+                                    return;
+                                }
+                                node = node.parentElement;
+                            }
 
-// Abrir modal
-document.querySelectorAll('.btn-cancelar').forEach(btn => {
+                            // fallback: al menos ocultar el iframe
+                            ifr.style.display = 'none';
+                            ifr.src = 'about:blank';
+                            return;
+                        }
+                    }
 
-    btn.addEventListener('click', function(){
+                    // 3) Fallback por IDs conocidos (por si el iframe no se detecta)
+                    const ids = ['libroDiarioModal', 'modalLibroOverlay', 'modalLibroDiario', 'libroDiarioOverlay'];
+                    for (const id of ids) {
+                        const el = p.document.getElementById(id);
+                        if (el) {
+                            el.style.display = 'none';
+                            const ifr = el.querySelector('iframe');
+                            if (ifr) ifr.src = 'about:blank';
+                            return;
+                        }
+                    }
+                }
+            } catch (e) {
+                // seguimos con fallback
+            }
 
-        ticketACancelar = this.dataset.ticket;
-
-        document.getElementById('cancelTicketInfo').innerText =
-            "Ticket: #" + ticketACancelar;
-
-        document.getElementById('cancelPassword').value = '';
-
-        document.getElementById('modalCancelar').style.display = 'flex';
-    });
-
-});
-
-// Cerrar
-document.getElementById('btnCerrarCancel').addEventListener('click', function(){
-    document.getElementById('modalCancelar').style.display = 'none';
-});
-
-// Confirmar
-document.getElementById('btnConfirmarCancel').addEventListener('click', function(){
-
-    const pass = document.getElementById('cancelPassword').value.trim();
-
-    if(!pass){
-        alert("Ingresá la contraseña");
-        return;
-    }
-
-    fetch('<?= $ruta ?>/cajero/cancelarTicket', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({
-            ticket: ticketACancelar,
-            password: pass
-        })
-    })
-    .then(res => res.json())
-    .then(data => {
-
-        if(data.status === 'ok'){
-            alert("Ticket cancelado correctamente");
-            location.reload();
-        } else {
-            alert("Error: " + data.message);
+            // Fallback si se abrió como página normal
+            if (window.history.length > 1) window.history.back();
+            else window.close();
         }
 
-    });
+        // Cerrar con ESC
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') cerrarLibroDiario();
+        });
+    </script>
 
-});
-
-</script>
 </body>
 
 </html>

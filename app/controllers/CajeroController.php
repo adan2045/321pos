@@ -371,30 +371,84 @@ $stmtMov->execute([
     }
 
     public function actionRegistrarCajaFuerte()
-    {
-        if (session_status() === PHP_SESSION_NONE) session_start();
+{
+    if (session_status() === PHP_SESSION_NONE) session_start();
 
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $monto = floatval($_POST['monto'] ?? 0);
-            $responsable = trim($_POST['responsable'] ?? '');
+    // Si no es POST, no tiene sentido registrar: volvemos al POS (o a donde estabas)
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        $back = $_SERVER['HTTP_REFERER'] ?? (\App::baseUrl() . "/pos");
+        header("Location: " . $back);
+        exit;
+    }
 
-            // ✅ Mejor: caja_id desde POST o desde sesión
-            $caja_id = $_POST['caja_id'] ?? ($_SESSION['caja_id'] ?? null);
+    $monto       = floatval($_POST['monto'] ?? 0);
+    $responsable = trim($_POST['responsable'] ?? '');
 
-            if ($monto > 0 && !empty($responsable) && !empty($caja_id)) {
-                $db = \DataBase::getInstance()->getConnection();
-                $stmt = $db->prepare("INSERT INTO caja_fuerte (fecha, monto, responsable, caja_id) VALUES (NOW(), ?, ?, ?)");
-                $stmt->execute([$monto, $responsable, $caja_id]);
+    // Motivo opcional (evita redundancia)
+    $motivo = trim($_POST['motivo'] ?? '');
+    if ($motivo === '') $motivo = null;
 
-                header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
-                exit;
-            } else {
-                $_SESSION['mensaje_error'] = "Faltan datos obligatorios para registrar el movimiento de Caja Fuerte.";
-                header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
-                exit;
-            }
+    // En desarrollo (sin login) debe ser NULL
+    $usuario_id = null;
+
+    // Cuando exista login, podés guardar acá el id
+    if (!empty($_SESSION['user_id'])) {
+        $usuario_id = (int)$_SESSION['user_id'];
+    }
+
+    $negocio_id = (int)($_SESSION['negocio_id'] ?? 1);
+
+    // Caja abierta REAL (sesión manda)
+    $cajaSesion = $_SESSION['caja_id'] ?? null;
+    $cajaPost   = $_POST['caja_id'] ?? null;
+
+    if (!$cajaSesion) {
+        $_SESSION['mensaje_error'] = "No hay caja abierta. Abrí caja antes de registrar caja fuerte.";
+        $back = $_SERVER['HTTP_REFERER'] ?? (\App::baseUrl() . "/pos");
+        header("Location: " . $back);
+        exit;
+    }
+
+    // Si viene caja_id por POST, lo validamos contra la sesión
+    if ($cajaPost && (int)$cajaPost !== (int)$cajaSesion) {
+        $_SESSION['mensaje_error'] = "Caja inválida. Recargá la pantalla y reintentá.";
+        $back = $_SERVER['HTTP_REFERER'] ?? (\App::baseUrl() . "/pos");
+        header("Location: " . $back);
+        exit;
+    }
+
+    if ($monto <= 0 || $monto > 10000000 || $responsable === '') {
+        $_SESSION['mensaje_error'] = "Datos inválidos para caja fuerte.";
+        $back = $_SERVER['HTTP_REFERER'] ?? (\App::baseUrl() . "/pos");
+        header("Location: " . $back);
+        exit;
+    }
+
+    $db = \DataBase::getInstance()->getConnection();
+
+    // Seguridad: si algún día hay usuario_id, verificamos que exista en usuarios (FK)
+    if ($usuario_id !== null) {
+        $chk = $db->prepare("SELECT id FROM usuarios WHERE id = ? LIMIT 1");
+        $chk->execute([$usuario_id]);
+        if (!$chk->fetchColumn()) {
+            $usuario_id = null;
         }
     }
+
+    $stmt = $db->prepare("
+        INSERT INTO caja_fuerte (fecha, monto, responsable, motivo, usuario_id, negocio_id, caja_id)
+        VALUES (NOW(), ?, ?, ?, ?, ?, ?)
+    ");
+    $stmt->execute([$monto, $responsable, $motivo, $usuario_id, $negocio_id, $cajaSesion]);
+
+    // ✅ Volver a donde estabas
+    // 1) redirect explícito (si lo mandás desde el form)
+    // 2) HTTP_REFERER (si no mandás redirect)
+    // 3) fallback al POS
+    $redirect = $_POST['redirect'] ?? ($_SERVER['HTTP_REFERER'] ?? (\App::baseUrl() . "/pos"));
+    header("Location: " . $redirect);
+    exit;
+}
 
     public function actionAbrirCaja()
     {
@@ -510,13 +564,25 @@ $stmtMov->execute([
         $stmt->execute([$fechaSeleccionada]);
         $notasCredito = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
-        $stmt = $db->prepare("SELECT id, monto, motivo, autorizado_por, fecha FROM gastos WHERE caja_id = ?");
-        $stmt->execute([$cajaId]);
-        $gastos = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        if ($cajaId) {
+            $stmt = $db->prepare("SELECT id, monto, motivo, autorizado_por, fecha FROM gastos WHERE caja_id = ? AND DATE(fecha) = ?");
+            $stmt->execute([$cajaId, $fechaSeleccionada]);
+            $gastos = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        } else {
+            $stmt = $db->prepare("SELECT id, monto, motivo, autorizado_por, fecha FROM gastos WHERE DATE(fecha) = ?");
+            $stmt->execute([$fechaSeleccionada]);
+            $gastos = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        }
 
-        $stmt = $db->prepare("SELECT id, monto, responsable, fecha FROM caja_fuerte WHERE caja_id = ?");
-        $stmt->execute([$cajaId]);
-        $cajaFuerte = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        if ($cajaId) {
+            $stmt = $db->prepare("SELECT id, monto, responsable, motivo, fecha FROM caja_fuerte WHERE caja_id = ? AND DATE(fecha) = ?");
+            $stmt->execute([$cajaId, $fechaSeleccionada]);
+            $cajaFuerte = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        } else {
+            $stmt = $db->prepare("SELECT id, monto, responsable, motivo, fecha FROM caja_fuerte WHERE DATE(fecha) = ?");
+            $stmt->execute([$fechaSeleccionada]);
+            $cajaFuerte = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        }
 
         $cacheMesas = [];
         $getNumeroMesa = function($mesaId) use (&$cacheMesas, $db) {
@@ -565,7 +631,7 @@ $stmtMov->execute([
         'total' => $v['total'],
         'mesa' => $getNumeroMesa($v['mesa_id']),
         'fecha_hora' => date('Y-m-d H:i', strtotime($v['fecha_cierre'])),
-        'ticket_url' => '/321POS/public/cajero/cuenta?id=' . $v['id']
+        'ticket_url' => $ruta . '/cajero/cuenta?id=' . $v['id']
     ];
 }
     foreach ($notasCredito as $nc) {
@@ -586,14 +652,18 @@ $stmtMov->execute([
 }
 
         foreach ($cajaFuerte as $cf) {
+            $montoCF = -abs($cf['monto']);
+            $detalleCF = "Depósito Caja Fuerte (" . ($cf['responsable'] ?? '') . ")";
+            if (!empty($cf['motivo'])) $detalleCF .= " — " . $cf['motivo'];
+
             $movimientos[] = [
                 'tipo' => 'caja_fuerte',
-                'detalle' => "Depósito Caja Fuerte (".$cf['responsable'].")",
-                'efectivo' => $cf['monto'],
+                'detalle' => $detalleCF,
+                'efectivo' => $montoCF,
                 'tarjeta' => '',
                 'qr' => '',
                 'mp' => '',
-                'total' => $cf['monto'],
+                'total' => $montoCF,
                 'mesa' => '',
                 'fecha_hora' => date('Y-m-d H:i', strtotime($cf['fecha'])),
                 'clase_efectivo' => 'egreso',
