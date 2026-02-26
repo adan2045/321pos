@@ -412,7 +412,259 @@ class CajeroController extends Controller {
         header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
         exit;
     }
+    public function actionFicharEstado()
+{
+    if (session_status() === PHP_SESSION_NONE) session_start();
+    header('Content-Type: application/json; charset=utf-8');
 
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['status'=>'error','message'=>'Método no permitido']);
+        return;
+    }
+
+    $db = \DataBase::getInstance()->getConnection();
+    $payload = json_decode((string)file_get_contents('php://input'), true) ?: [];
+
+    $empleadoId = isset($payload['empleado_id']) ? (int)$payload['empleado_id'] : 0;
+    $empleadoNumero = isset($payload['empleado_numero']) ? trim((string)$payload['empleado_numero']) : '';
+
+    // Buscar empleado por número o por id
+    if ($empleadoId <= 0) {
+        if ($empleadoNumero === '') {
+            http_response_code(400);
+            echo json_encode(['status'=>'error','message'=>'Falta empleado_numero']);
+            return;
+        }
+
+        $st = $db->prepare("SELECT id, nombre FROM empleados WHERE numero_empleado = ? LIMIT 1");
+        $st->execute([$empleadoNumero]);
+        $emp = $st->fetch(\PDO::FETCH_ASSOC);
+
+        if (!$emp) {
+            http_response_code(404);
+            echo json_encode(['status'=>'error','message'=>'Empleado no encontrado']);
+            return;
+        }
+
+        $empleadoId = (int)$emp['id'];
+        $nombre = (string)$emp['nombre'];
+    } else {
+        $st = $db->prepare("SELECT id, nombre FROM empleados WHERE id = ? LIMIT 1");
+        $st->execute([$empleadoId]);
+        $emp = $st->fetch(\PDO::FETCH_ASSOC);
+
+        if (!$emp) {
+            http_response_code(404);
+            echo json_encode(['status'=>'error','message'=>'Empleado no encontrado']);
+            return;
+        }
+
+        $nombre = (string)$emp['nombre'];
+    }
+
+    $hoy = date('Y-m-d');
+
+    // Última entrada del día
+    $st = $db->prepare("
+        SELECT fecha_hora
+        FROM fichadas
+        WHERE empleado_id = ?
+          AND fecha = ?
+          AND tipo = 'entrada'
+        ORDER BY fecha_hora DESC
+        LIMIT 1
+    ");
+    $st->execute([$empleadoId, $hoy]);
+    $entrada = $st->fetchColumn();
+
+    // Última salida del día
+    $st2 = $db->prepare("
+        SELECT fecha_hora
+        FROM fichadas
+        WHERE empleado_id = ?
+          AND fecha = ?
+          AND tipo = 'salida'
+        ORDER BY fecha_hora DESC
+        LIMIT 1
+    ");
+    $st2->execute([$empleadoId, $hoy]);
+    $salida = $st2->fetchColumn();
+
+    $enTurno = false;
+    $segundos = 0;
+    $entradaHora = null;
+
+    if ($entrada) {
+        if (!$salida || strtotime($salida) < strtotime($entrada)) {
+            $enTurno = true;
+            $entradaHora = date('H:i', strtotime($entrada));
+            $segundos = max(0, time() - strtotime($entrada));
+        }
+    }
+
+    echo json_encode([
+        'status' => 'ok',
+        'empleado_id' => $empleadoId,
+        'empleado_nombre' => $nombre,
+        'en_turno' => $enTurno,
+        'entrada_hora' => $entradaHora,
+        'segundos_trabajados' => $segundos
+    ]);
+}
+
+public function actionFicharRegistrar()
+{
+    if (session_status() === PHP_SESSION_NONE) session_start();
+    header('Content-Type: application/json; charset=utf-8');
+
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['status'=>'error','message'=>'Método no permitido']);
+        return;
+    }
+
+    $payload = json_decode((string)file_get_contents('php://input'), true) ?: [];
+    $empleadoId = (int)($payload['empleado_id'] ?? 0);
+    $tipo = strtolower(trim((string)($payload['tipo'] ?? '')));
+
+    if ($empleadoId <= 0 || !in_array($tipo, ['entrada','salida'], true)) {
+        http_response_code(400);
+        echo json_encode(['status'=>'error','message'=>'Datos inválidos']);
+        return;
+    }
+
+    $db = \DataBase::getInstance()->getConnection();
+
+    // registrado_por: usuario logueado si existe, si no NULL
+    $registradoPor = null;
+    if (!empty($_SESSION['user_id']) && is_numeric($_SESSION['user_id'])) {
+        $registradoPor = (int)$_SESSION['user_id'];
+        $chk = $db->prepare("SELECT id FROM usuarios WHERE id = ? LIMIT 1");
+        $chk->execute([$registradoPor]);
+        if (!$chk->fetchColumn()) $registradoPor = null;
+    }
+
+    $negocioId = isset($_SESSION['negocio_id']) ? (int)$_SESSION['negocio_id'] : null;
+
+    $hoy = date('Y-m-d');
+    $ahora = date('Y-m-d H:i:s');
+
+    try {
+        $db->beginTransaction();
+
+        // Si es salida: calcular tiempo trabajado desde última entrada no cerrada
+        $tiempoMin = null;
+        if ($tipo === 'salida') {
+            $st = $db->prepare("
+                SELECT fecha_hora
+                FROM fichadas
+                WHERE empleado_id = ?
+                  AND fecha = ?
+                  AND tipo = 'entrada'
+                ORDER BY fecha_hora DESC
+                LIMIT 1
+            ");
+            $st->execute([$empleadoId, $hoy]);
+            $entrada = $st->fetchColumn();
+
+            $st2 = $db->prepare("
+                SELECT fecha_hora
+                FROM fichadas
+                WHERE empleado_id = ?
+                  AND fecha = ?
+                  AND tipo = 'salida'
+                ORDER BY fecha_hora DESC
+                LIMIT 1
+            ");
+            $st2->execute([$empleadoId, $hoy]);
+            $salida = $st2->fetchColumn();
+
+            if ($entrada && (!$salida || strtotime($salida) < strtotime($entrada))) {
+                $tiempoMin = (int) floor((strtotime($ahora) - strtotime($entrada)) / 60);
+            }
+        }
+
+        $stmt = $db->prepare("
+            INSERT INTO fichadas
+              (negocio_id, empleado_id, tipo, fecha_hora, fecha, tardanza_min, es_tardanza, tiempo_trabajado_min, turno, registrado_por, notas)
+            VALUES
+              (?, ?, ?, ?, ?, NULL, 0, ?, 1, ?, NULL)
+        ");
+        $stmt->execute([
+            $negocioId,
+            $empleadoId,
+            $tipo,
+            $ahora,
+            $hoy,
+            $tiempoMin,
+            $registradoPor
+        ]);
+
+        $db->commit();
+        echo json_encode(['status'=>'ok']);
+        return;
+
+    } catch (\Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        http_response_code(500);
+        echo json_encode(['status'=>'error','message'=>$e->getMessage()]);
+        return;
+    }
+}
+    public function actionFichar()
+{
+    if (session_status() === PHP_SESSION_NONE) session_start();
+
+    // Solo POST
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        header("Location: " . \App::baseUrl() . "/pos");
+        exit;
+    }
+
+    $accion = strtolower(trim($_POST['accion'] ?? ''));
+    $obs    = trim($_POST['obs'] ?? '');
+    $redirect = $_POST['redirect'] ?? (\App::baseUrl() . "/pos");
+
+    if (!in_array($accion, ['entrada', 'salida'], true)) {
+        $_SESSION['mensaje_error'] = "Acción inválida para fichar.";
+        header("Location: " . $redirect);
+        exit;
+    }
+
+    $db = \DataBase::getInstance()->getConnection();
+
+    // Usuario (modo dev sin login => NULL)
+    $usuario_id = null;
+    if (!empty($_SESSION['user_id']) && is_numeric($_SESSION['user_id'])) {
+        $usuario_id = (int)$_SESSION['user_id'];
+        $chk = $db->prepare("SELECT id FROM usuarios WHERE id = ? LIMIT 1");
+        $chk->execute([$usuario_id]);
+        if (!$chk->fetchColumn()) $usuario_id = null;
+    }
+
+    // Negocio si lo usás (si no existe, queda 1)
+    $negocio_id = (int)($_SESSION['negocio_id'] ?? 1);
+
+    try {
+        // Si tu tabla se llama distinto, decime y lo ajusto
+        $stmt = $db->prepare("
+            INSERT INTO fichadas (fecha, accion, observacion, usuario_id, negocio_id)
+            VALUES (NOW(), ?, ?, ?, ?)
+        ");
+        $stmt->execute([$accion, ($obs !== '' ? $obs : null), $usuario_id, $negocio_id]);
+
+        $_SESSION['mensaje_exito'] = "Fichada registrada.";
+        header("Location: " . $redirect);
+        exit;
+
+    } catch (\Throwable $e) {
+        // Si no existe la tabla, te lo va a decir acá
+        $_SESSION['mensaje_error'] = "Error al fichar: " . $e->getMessage();
+        header("Location: " . $redirect);
+        exit;
+    }
+}
     public function actionCerrarCaja() {
         if (session_status() === PHP_SESSION_NONE) session_start();
 

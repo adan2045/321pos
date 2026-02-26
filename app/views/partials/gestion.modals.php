@@ -105,7 +105,43 @@ $cajaIdSesion = $_SESSION['caja_id'] ?? '';
     </form>
   </div>
 </div>
+<!-- ===================== -->
+<!-- MODAL: FICHAR (PRO - 1 SOLO MODAL) -->
+<!-- ===================== -->
+<div id="ficharModal" class="modal-backdrop" style="display:none;">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="ficharTitle">
+    <div class="modal-head">
+      <div class="modal-title" id="ficharTitle">🕒 Fichar</div>
+      <button type="button" class="modal-x" onclick="cerrarFicharModal()">✕</button>
+    </div>
 
+    <div class="modal-body">
+      <div class="modal-row">
+        <label class="modal-label">N° de empleado</label>
+        <input id="ficharEmpleadoNum" type="text" class="modal-input" placeholder="Ej: 001">
+      </div>
+
+      <div class="modal-actions" style="justify-content:flex-end;">
+        <button type="button" class="modal-btn ghost" onclick="cerrarFicharModal()">Cancelar</button>
+        <button type="button" class="modal-btn primary" onclick="ficharCargar()">Confirmar</button>
+      </div>
+
+      <div style="height:1px;background:#e5e7eb;margin:14px 0;"></div>
+
+      <div id="ficharInfo" style="display:none;">
+        <div style="font-weight:900;font-size:16px;" id="ficharNombre">—</div>
+        <div style="color:#6b7280;font-size:12px;margin-top:3px;" id="ficharEstado">—</div>
+
+        <div style="margin-top:10px;font-weight:900;font-size:18px;" id="ficharTimer">00:00:00</div>
+
+        <div class="modal-actions" style="justify-content:flex-end; gap:10px; margin-top:14px;">
+          <button type="button" class="modal-btn ghost" id="btnFicharEntrada" onclick="ficharRegistrar('entrada')" disabled>Entrada</button>
+          <button type="button" class="modal-btn primary" id="btnFicharSalida" onclick="ficharRegistrar('salida')" disabled>Salida</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 <!-- ===================== -->
 <!-- ESTILOS (si ya tenés estilos de modal, podés borrar esta parte) -->
 <!-- ===================== -->

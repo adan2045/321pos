@@ -1219,7 +1219,7 @@ document.getElementById('busquedaAccesoInput').addEventListener('input', functio
 document.getElementById('btnInicioCaja')?.addEventListener('click', (e) => { e.preventDefault(); abrirCajaModal(); });
 document.getElementById('btnEgresos')?.addEventListener('click', (e) => { e.preventDefault(); abrirGastoModal(); });
 document.getElementById('btnCajaFuerte')?.addEventListener('click', (e) => { e.preventDefault(); abrirCajaFuerteModal(); });
-document.getElementById('btnFichar')?.addEventListener('click', (e) => { e.preventDefault(); alert('🕐 Fichar (pendiente)'); });
+document.getElementById('btnFichar')?.addEventListener('click', (e) => { e.preventDefault(); abrirFicharModal(); });
 
 // ---------- ventas del turno ----------
 function openOverlay(url){
@@ -1263,6 +1263,141 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closePlanilla();
 });
 
+// ===== FICHAR (MODAL ÚNICO) =====
+let ficharEmpleadoId = null;
+let ficharTimerInt = null;
+
+function abrirFicharModal(){
+  const m = document.getElementById('ficharModal');
+  if(!m){ alert('No existe ficharModal (revisá gestion.modals.php)'); return; }
+  m.style.display = 'flex';
+
+  ficharEmpleadoId = null;
+  stopFicharTimer();
+
+  // reset UI si existen (para el modal PRO)
+  const info = document.getElementById('ficharInfo');
+  if(info) info.style.display = 'none';
+
+  const n = document.getElementById('ficharNombre'); if(n) n.textContent = '—';
+  const e = document.getElementById('ficharEstado'); if(e) e.textContent = '—';
+  const t = document.getElementById('ficharTimer');  if(t) t.textContent = '00:00:00';
+
+  const b1 = document.getElementById('btnFicharEntrada'); if(b1) b1.disabled = true;
+  const b2 = document.getElementById('btnFicharSalida');  if(b2) b2.disabled = true;
+
+  const inp = document.getElementById('ficharEmpleadoNum');
+  if(inp){ inp.value = ''; setTimeout(()=>inp.focus(), 80); }
+}
+
+function cerrarFicharModal(){
+  const m = document.getElementById('ficharModal');
+  if(m) m.style.display = 'none';
+  stopFicharTimer();
+}
+
+function stopFicharTimer(){
+  if(ficharTimerInt){ clearInterval(ficharTimerInt); ficharTimerInt = null; }
+}
+
+function fmt2(n){ return String(n).padStart(2,'0'); }
+function renderTimer(sec){
+  const el = document.getElementById('ficharTimer');
+  if(!el) return;
+
+  sec = Math.max(0, sec|0);
+  const h = Math.floor(sec/3600);
+  const m = Math.floor((sec%3600)/60);
+  const s = sec%60;
+  el.textContent = `${fmt2(h)}:${fmt2(m)}:${fmt2(s)}`;
+}
+
+async function ficharCargar(){
+  const num = (document.getElementById('ficharEmpleadoNum')?.value || '').trim();
+  if(!num){ alert('Ingresá un número de empleado.'); return; }
+
+  const res = await fetch(url('cajero/ficharEstado'), {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ empleado_numero: num })
+  });
+
+  const data = await res.json().catch(()=>null);
+  if(!res.ok || !data || data.status !== 'ok'){
+    alert(data?.message || 'No se pudo cargar empleado');
+    return;
+  }
+
+  ficharEmpleadoId = data.empleado_id;
+
+  // mostrar info
+  const info = document.getElementById('ficharInfo');
+  if(info) info.style.display = 'block';
+
+  const nombre = document.getElementById('ficharNombre');
+  if(nombre) nombre.textContent = data.empleado_nombre;
+
+  const b1 = document.getElementById('btnFicharEntrada'); if(b1) b1.disabled = false;
+  const b2 = document.getElementById('btnFicharSalida');  if(b2) b2.disabled = false;
+
+  const estado = document.getElementById('ficharEstado');
+  if(data.en_turno){
+    if(estado) estado.textContent = 'En turno desde ' + data.entrada_hora;
+
+    let sec = data.segundos_trabajados || 0;
+    renderTimer(sec);
+    stopFicharTimer();
+    ficharTimerInt = setInterval(()=>{ sec++; renderTimer(sec); }, 1000);
+
+  } else {
+    if(estado) estado.textContent = 'Hoy aún no ha ingresado';
+    renderTimer(0);
+    stopFicharTimer();
+  }
+}
+
+async function ficharRegistrar(tipo){
+  if(!ficharEmpleadoId){ alert('Primero confirmá el empleado.'); return; }
+
+  const res = await fetch(url('cajero/ficharRegistrar'), {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ empleado_id: ficharEmpleadoId, tipo })
+  });
+
+  const data = await res.json().catch(()=>null);
+  if(!res.ok || !data || data.status !== 'ok'){
+    alert(data?.message || 'Error al fichar');
+    return;
+  }
+
+  // refrescar el estado en el mismo modal (sin alert)
+  await fetch(url('cajero/ficharEstado'), {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ empleado_id: ficharEmpleadoId })
+  })
+  .then(r=>r.json())
+  .then(st=>{
+    if(st && st.status === 'ok'){
+      const nombre = document.getElementById('ficharNombre');
+      if(nombre) nombre.textContent = st.empleado_nombre;
+
+      const estado = document.getElementById('ficharEstado');
+      if(st.en_turno){
+        if(estado) estado.textContent = 'En turno desde ' + st.entrada_hora;
+        let sec = st.segundos_trabajados || 0;
+        renderTimer(sec);
+        stopFicharTimer();
+        ficharTimerInt = setInterval(()=>{ sec++; renderTimer(sec); }, 1000);
+      } else {
+        if(estado) estado.textContent = 'Hoy aún no ha ingresado';
+        renderTimer(0);
+        stopFicharTimer();
+      }
+    }
+  });
+}
 // ---------- Reloj ----------
 function actualizarReloj(){
   const a=new Date();
