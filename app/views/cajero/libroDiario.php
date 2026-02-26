@@ -106,7 +106,8 @@
             margin-top: 9px;
         }
 
-        .btn-cerrar {
+        
+        .btn-cerrar{
             padding: 8px 18px;
             border: none;
             border-radius: 8px;
@@ -117,9 +118,8 @@
             font-weight: 700;
             white-space: nowrap;
         }
-
-        .btn-cerrar:hover {
-            background: #333;
+        .btn-cerrar:hover{
+            background:#333;
         }
 
         .planilla-botones .btn {
@@ -220,7 +220,6 @@
                 <button type="button" class="btn-cerrar" onclick="cerrarLibroDiario()">Cerrar</button>
             </div>
         </div>
-
         <table class="planilla-movimientos">
             <thead>
                 <tr>
@@ -234,13 +233,15 @@
                     <th>Hora</th>
                 </tr>
             </thead>
-
             <tbody>
                 <?php foreach ($movimientos as $mov):
+                    // Clases por tipo: inicio=verde, gasto/caja fuerte=rojo, total=negro
                     $trClass = '';
-                    if ($mov['tipo'] === 'inicio') $trClass = 'inicio';
-                    if (in_array($mov['tipo'], ['gasto', 'caja_fuerte'])) $trClass = 'egreso';
-                ?>
+                    if ($mov['tipo'] === 'inicio')
+                        $trClass = 'inicio';
+                    if (in_array($mov['tipo'], ['gasto', 'caja_fuerte']))
+                        $trClass = 'egreso';
+                    ?>
                     <tr class="<?= $trClass ?>">
                         <td>
                             <?php if ($mov['tipo'] === 'venta' && !empty($mov['ticket_url'])): ?>
@@ -251,17 +252,26 @@
                                 <?= htmlspecialchars($mov['detalle']) ?>
                             <?php endif; ?>
                         </td>
-                        <td><?= ($mov['efectivo'] !== '' ? number_format($mov['efectivo'], 0, '', '.') : '') ?></td>
-                        <td><?= ($mov['tarjeta'] !== '' ? number_format($mov['tarjeta'], 0, '', '.') : '') ?></td>
-                        <td><?= ($mov['qr'] !== '' ? number_format($mov['qr'], 0, '', '.') : '') ?></td>
-                        <td><?= ($mov['mp'] !== '' ? number_format($mov['mp'], 0, '', '.') : '') ?></td>
-                        <td><?= ($mov['total'] !== '' ? number_format($mov['total'], 0, '', '.') : '') ?></td>
+                        <td>
+                            <?= ($mov['efectivo'] !== '' ? number_format($mov['efectivo'], 0, '', '.') : '') ?>
+                        </td>
+                        <td>
+                            <?= ($mov['tarjeta'] !== '' ? number_format($mov['tarjeta'], 0, '', '.') : '') ?>
+                        </td>
+                        <td>
+                            <?= ($mov['qr'] !== '' ? number_format($mov['qr'], 0, '', '.') : '') ?>
+                        </td>
+                        <td>
+                            <?= ($mov['mp'] !== '' ? number_format($mov['mp'], 0, '', '.') : '') ?>
+                        </td>
+                        <td>
+                            <?= ($mov['total'] !== '' ? number_format($mov['total'], 0, '', '.') : '') ?>
+                        </td>
                         <td><?= $mov['mesa'] ?></td>
                         <td><?= date('H:i', strtotime($mov['fecha_hora'])) ?></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
-
             <tfoot>
                 <tr class="total">
                     <td><b>Totales</b></td>
@@ -274,79 +284,59 @@
                 </tr>
             </tfoot>
         </table>
-
         <div class="planilla-botones">
             <button onclick="window.print()" class="btn">Imprimir</button>
         </div>
     </div>
 
-    <script>
-        function cerrarLibroDiario() {
-            // Caso real: embebido dentro del POS (iframe dentro de un overlay).
-            try {
-                const p = window.parent;
-                if (p && p !== window && p.document) {
+<script>
+function cerrarLibroDiario(){
+  try{
+    const p = window.parent;
+    if(p && p !== window && p.document){
+      // buscar el iframe que está mostrando esta vista
+      const iframes = p.document.querySelectorAll('iframe');
+      for(const ifr of iframes){
+        if(ifr && ifr.contentWindow === window){
 
-                    // 1) Encontrar EL iframe que muestra esta página, en el documento padre
-                    const iframes = p.document.querySelectorAll('iframe');
-                    for (const ifr of iframes) {
-                        if (ifr && ifr.contentWindow === window) {
+          // subir en el DOM hasta encontrar el contenedor overlay/modal REAL
+          let node = ifr.parentElement;
+          while(node && node !== p.document.body){
+            const cls = (node.className || '').toString().toLowerCase();
+            const style = p.getComputedStyle(node);
 
-                            // 2) Subir por el DOM hasta encontrar el contenedor overlay/modal y ocultarlo
-                            let node = ifr;
-                            while (node && node !== p.document.body) {
-                                const cs = p.getComputedStyle(node);
-                                const cls = (node.className || '').toString().toLowerCase();
+            const esOverlay =
+              style.position === 'fixed' ||
+              cls.includes('modal') ||
+              cls.includes('overlay') ||
+              cls.includes('backdrop');
 
-                                const pintaOverlay =
-                                    cs.position === 'fixed' ||
-                                    cs.position === 'absolute' ||
-                                    cls.includes('modal') ||
-                                    cls.includes('overlay') ||
-                                    cls.includes('backdrop');
-
-                                if (pintaOverlay) {
-                                    node.style.display = 'none';
-                                    // limpiar iframe para que no quede "pantalla blanca" si vuelve a mostrar
-                                    ifr.src = 'about:blank';
-                                    return;
-                                }
-                                node = node.parentElement;
-                            }
-
-                            // fallback: al menos ocultar el iframe
-                            ifr.style.display = 'none';
-                            ifr.src = 'about:blank';
-                            return;
-                        }
-                    }
-
-                    // 3) Fallback por IDs conocidos (por si el iframe no se detecta)
-                    const ids = ['libroDiarioModal', 'modalLibroOverlay', 'modalLibroDiario', 'libroDiarioOverlay'];
-                    for (const id of ids) {
-                        const el = p.document.getElementById(id);
-                        if (el) {
-                            el.style.display = 'none';
-                            const ifr = el.querySelector('iframe');
-                            if (ifr) ifr.src = 'about:blank';
-                            return;
-                        }
-                    }
-                }
-            } catch (e) {
-                // seguimos con fallback
+            if(esOverlay){
+              node.style.display = 'none';
+              // limpiar iframe para que no quede blanco
+              ifr.src = 'about:blank';
+              return;
             }
+            node = node.parentElement;
+          }
 
-            // Fallback si se abrió como página normal
-            if (window.history.length > 1) window.history.back();
-            else window.close();
+          // si no encontramos overlay, ocultamos el iframe
+          ifr.style.display = 'none';
+          ifr.src = 'about:blank';
+          return;
         }
+      }
+    }
+  }catch(e){}
 
-        // Cerrar con ESC
-        document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape') cerrarLibroDiario();
-        });
-    </script>
+  // fallback: volver al POS (no a planilla)
+  window.location.href = '<?= \App::baseUrl() ?>/pos';
+}
+
+document.addEventListener('keydown', (e)=>{
+  if(e.key === 'Escape') cerrarLibroDiario();
+});
+</script>
 
 </body>
 
