@@ -84,61 +84,163 @@ class CajeroController extends Controller {
     }
 
     public function actionRegistrarGasto()
-    {
-        if (session_status() === PHP_SESSION_NONE) session_start();
+{
+    if (session_status() === PHP_SESSION_NONE) session_start();
 
-        $redirect   = $_POST['redirect'] ?? null;
-        $aceptaJson = (strpos($_SERVER['HTTP_ACCEPT'] ?? '', 'application/json') !== false);
-        $esAjax     = (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest');
+    $redirect   = $_POST['redirect'] ?? null;
+    $aceptaJson = (strpos($_SERVER['HTTP_ACCEPT'] ?? '', 'application/json') !== false);
+    $esAjax     = (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest');
 
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            if ($redirect) { header("Location: " . $redirect); exit; }
-            header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
-            exit;
-        }
-
-        $motivo         = trim($_POST['motivo'] ?? '');
-        $monto          = floatval($_POST['monto'] ?? 0);
-        $autorizado_por = trim($_POST['autorizado_por'] ?? '');
-
-        $db = \DataBase::getInstance()->getConnection();
-
-        $usuario_id = null;
-        if (!empty($_SESSION['user_id']) && is_numeric($_SESSION['user_id'])) {
-            $usuario_id = (int)$_SESSION['user_id'];
-            $chk = $db->prepare("SELECT id FROM usuarios WHERE id = ? LIMIT 1");
-            $chk->execute([$usuario_id]);
-            if (!$chk->fetchColumn()) $usuario_id = null;
-        }
-
-        $caja_id = $_POST['caja_id'] ?? ($_SESSION['caja_id'] ?? null);
-
-        if ($motivo === '' || $monto <= 0 || $autorizado_por === '' || empty($caja_id)) {
-            if ($aceptaJson || $esAjax) {
-                header('Content-Type: application/json; charset=utf-8');
-                echo json_encode(['status' => 'error', 'message' => 'Faltan datos obligatorios para registrar el gasto']);
-                exit;
-            }
-            echo "<script>alert('Faltan datos obligatorios para registrar el gasto'); window.history.back();</script>";
-            exit;
-        }
-
-        $stmt = $db->prepare("
-            INSERT INTO gastos (fecha, monto, motivo, autorizado_por, usuario_id, caja_id)
-            VALUES (NOW(), ?, ?, ?, ?, ?)
-        ");
-        $stmt->execute([$monto, $motivo, $autorizado_por, $usuario_id, $caja_id]);
-
+    $responderError = function(string $msg) use ($aceptaJson, $esAjax) {
         if ($aceptaJson || $esAjax) {
             header('Content-Type: application/json; charset=utf-8');
-            echo json_encode(['status' => 'ok']);
+            echo json_encode(['status' => 'error', 'message' => $msg]);
             exit;
         }
+        echo "<script>alert(" . json_encode($msg) . "); window.history.back();</script>";
+        exit;
+    };
 
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         if ($redirect) { header("Location: " . $redirect); exit; }
         header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
         exit;
     }
+
+    $motivo         = trim($_POST['motivo'] ?? '');
+    $monto          = (float)($_POST['monto'] ?? 0);
+    $autorizado_por = trim($_POST['autorizado_por'] ?? '');
+
+    // ✅ NUEVO: categoria_id (opcional)
+    $categoria_id = $_POST['categoria_id'] ?? null;
+    $categoria_id = ($categoria_id === '' || $categoria_id === null) ? null : (int)$categoria_id;
+
+    $db = \DataBase::getInstance()->getConnection();
+
+    // Usuario (si existe)
+    $usuario_id = null;
+    if (!empty($_SESSION['user_id']) && is_numeric($_SESSION['user_id'])) {
+        $usuario_id = (int)$_SESSION['user_id'];
+        $chk = $db->prepare("SELECT id FROM usuarios WHERE id = ? LIMIT 1");
+        $chk->execute([$usuario_id]);
+        if (!$chk->fetchColumn()) $usuario_id = null;
+    }
+
+    $caja_id = $_POST['caja_id'] ?? ($_SESSION['caja_id'] ?? null);
+
+    // Validación base
+    if ($motivo === '' || $monto <= 0 || $autorizado_por === '' || empty($caja_id)) {
+        $responderError('Faltan datos obligatorios para registrar el gasto');
+    }
+
+    // ✅ Si querés que sea OBLIGATORIO, descomentá:
+    // if ($categoria_id === null || $categoria_id <= 0) {
+    //     $responderError('Seleccioná una categoría de gasto');
+    // }
+
+    // Validar categoría si vino
+    if ($categoria_id !== null) {
+        if ($categoria_id <= 0) {
+            $responderError('Categoría inválida');
+        }
+        $chkCat = $db->prepare("SELECT id FROM categorias_gasto WHERE id = ? AND activo = 1 LIMIT 1");
+        $chkCat->execute([$categoria_id]);
+        if (!$chkCat->fetchColumn()) {
+            $responderError('Categoría inválida o inactiva');
+        }
+    }
+
+    // Insert con categoria_id
+    try {
+        $stmt = $db->prepare("
+            INSERT INTO gastos (fecha, monto, motivo, autorizado_por, usuario_id, caja_id, categoria_id)
+            VALUES (NOW(), ?, ?, ?, ?, ?, ?)
+        ");
+        $stmt->execute([$monto, $motivo, $autorizado_por, $usuario_id, $caja_id, $categoria_id]);
+    } catch (\Exception $e) {
+        $responderError('Error al registrar el gasto');
+    }
+
+    if ($aceptaJson || $esAjax) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['status' => 'ok']);
+        exit;
+    }
+
+    if ($redirect) { header("Location: " . $redirect); exit; }
+    header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
+    exit;
+}
+    public function actionRegistrarIngresoCaja()
+{
+    if (session_status() === PHP_SESSION_NONE) session_start();
+
+    $redirect   = $_POST['redirect'] ?? null;
+    $aceptaJson = (strpos($_SERVER['HTTP_ACCEPT'] ?? '', 'application/json') !== false);
+    $esAjax     = (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest');
+
+    $responderError = function(string $msg) use ($aceptaJson, $esAjax) {
+        if ($aceptaJson || $esAjax) {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['status' => 'error', 'message' => $msg]);
+            exit;
+        }
+        echo "<script>alert(" . json_encode($msg) . "); window.history.back();</script>";
+        exit;
+    };
+
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        if ($redirect) { header("Location: " . $redirect); exit; }
+        header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
+        exit;
+    }
+
+    $monto       = (float)($_POST['monto'] ?? 0);
+    $responsable = trim($_POST['responsable'] ?? '');
+    $motivo      = trim($_POST['motivo'] ?? 'Ingreso a caja chica');
+
+    $db = \DataBase::getInstance()->getConnection();
+
+    $usuario_id = null;
+    if (!empty($_SESSION['user_id']) && is_numeric($_SESSION['user_id'])) {
+        $usuario_id = (int)$_SESSION['user_id'];
+        $chk = $db->prepare("SELECT id FROM usuarios WHERE id = ? LIMIT 1");
+        $chk->execute([$usuario_id]);
+        if (!$chk->fetchColumn()) $usuario_id = null;
+    }
+
+    $caja_id = $_POST['caja_id'] ?? ($_SESSION['caja_id'] ?? null);
+
+    if ($monto <= 0 || $responsable === '' || empty($caja_id)) {
+        $responderError('Faltan datos obligatorios para registrar el ingreso');
+    }
+
+    // negocio_id opcional (si lo tenés en sesión)
+    $negocio_id = null;
+    if (!empty($_SESSION['negocio_id']) && is_numeric($_SESSION['negocio_id'])) {
+        $negocio_id = (int)$_SESSION['negocio_id'];
+    }
+
+    try {
+        $stmt = $db->prepare("
+            INSERT INTO ingresos_caja (fecha, monto, motivo, responsable, usuario_id, caja_id, negocio_id)
+            VALUES (NOW(), ?, ?, ?, ?, ?, ?)
+        ");
+        $stmt->execute([$monto, $motivo, $responsable, $usuario_id, $caja_id, $negocio_id]);
+    } catch (\Exception $e) {
+        $responderError('Error al registrar el ingreso');
+    }
+
+    if ($aceptaJson || $esAjax) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['status' => 'ok']);
+        exit;
+    }
+
+    if ($redirect) { header("Location: " . $redirect); exit; }
+    header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
+    exit;
+}
 
     public function actionCuentaMesa()
     {
@@ -628,7 +730,23 @@ class CajeroController extends Controller {
 
         require __DIR__ . '/../views/cajero/libroDiario.php';
     }
+    public function actionCategoriasGastoJson()
+{
+    if (session_status() === PHP_SESSION_NONE) session_start();
+    header('Content-Type: application/json; charset=utf-8');
 
+    $db = \DataBase::getInstance()->getConnection();
+
+    $rows = $db->query("
+        SELECT id, nombre
+        FROM categorias_gasto
+        WHERE activo = 1
+        ORDER BY orden ASC, nombre ASC
+    ")->fetchAll(\PDO::FETCH_ASSOC);
+
+    echo json_encode(['status' => 'ok', 'items' => $rows]);
+    exit;
+}
     // =========================
     // TICKET JSON (pedido_detalle)
     // =========================

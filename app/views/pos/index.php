@@ -842,8 +842,10 @@ document.getElementById('btnInicioCaja')?.addEventListener('click', e => { e.pre
 document.getElementById('btnEgresos')?.addEventListener('click',    e => { e.preventDefault(); abrirGastoModal(); });
 document.getElementById('btnCajaFuerte')?.addEventListener('click', e => { e.preventDefault(); abrirCajaFuerteModal(); });
 document.getElementById('btnFichar')?.addEventListener('click',     e => { e.preventDefault(); abrirFicharModal(); });
-document.getElementById('btnIngresos')?.addEventListener('click',   e => { e.preventDefault(); openOverlay(url('cajero/ingresos')); });
-
+document.getElementById('btnIngresos')?.addEventListener('click', e => {
+  e.preventDefault();
+  abrirIngresoModal();
+});
 // ---------- PIN Admin ----------
 const ADMIN_PIN = '1234'; // ← Cambiá por tu PIN real
 let pinActual = '', pinDestinoCallback = null;

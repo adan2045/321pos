@@ -32,11 +32,45 @@ $cajaIdSesion = $_SESSION['caja_id'] ?? '';
     </form>
   </div>
 </div>
+<!-- ===================== -->
+<!-- MODAL: INGRESO CAJA CHICA -->
+<!-- ===================== -->
+<div id="ingresoModal" class="modal-backdrop" style="display:none;">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="ingresoTitle">
+    <div class="modal-head">
+      <div class="modal-title" id="ingresoTitle">💰 Ingreso a Caja Chica</div>
+      <button type="button" class="modal-x" onclick="cerrarIngresoModal()">✕</button>
+    </div>
 
+    <form method="POST" action="<?= $ruta ?>/cajero/registrarIngresoCaja" class="modal-body">
+      <input type="hidden" name="caja_id" value="<?= htmlspecialchars($cajaIdSesion) ?>">
+      <input type="hidden" name="redirect" value="<?= $ruta ?>/pos">
+
+      <div class="modal-row">
+        <label class="modal-label">Monto</label>
+        <input name="monto" type="number" step="0.01" min="0" class="modal-input" required>
+      </div>
+
+      <div class="modal-row">
+        <label class="modal-label">Responsable</label>
+        <input name="responsable" type="text" class="modal-input" placeholder="Ej: Encargado" required>
+      </div>
+
+      <div class="modal-row">
+        <label class="modal-label">Motivo (opcional)</label>
+        <input name="motivo" type="text" class="modal-input" placeholder="Ej: Cambio / Aporte">
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="modal-btn ghost" onclick="cerrarIngresoModal()">Cancelar</button>
+        <button type="submit" class="modal-btn primary">Guardar</button>
+      </div>
+    </form>
+  </div>
+</div>
 <!-- ===================== -->
 <!-- MODAL: GASTO / EGRESO -->
 <!-- ===================== -->
-
 <div id="gastoModal" class="modal-backdrop" style="display:none;">
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="gastoTitle">
     <div class="modal-head">
@@ -48,6 +82,14 @@ $cajaIdSesion = $_SESSION['caja_id'] ?? '';
     <form method="POST" action="<?= $ruta ?>/cajero/registrarGasto" class="modal-body">
       <input type="hidden" name="caja_id" value="<?= htmlspecialchars($cajaIdSesion) ?>">
       <input type="hidden" name="redirect" value="<?= $ruta ?>/pos">
+
+      <!-- ✅ NUEVO: Categoría -->
+      <div class="modal-row">
+        <label class="modal-label">Categoría</label>
+        <select name="categoria_id" id="gastoCategoria" class="modal-input" required>
+          <option value="">— Seleccionar —</option>
+        </select>
+      </div>
 
       <div class="modal-row">
         <label class="modal-label">Motivo</label>
@@ -71,7 +113,6 @@ $cajaIdSesion = $_SESSION['caja_id'] ?? '';
     </form>
   </div>
 </div>
-
 
 <!-- ===================== -->
 <!-- MODAL: CAJA FUERTE -->
@@ -105,6 +146,7 @@ $cajaIdSesion = $_SESSION['caja_id'] ?? '';
     </form>
   </div>
 </div>
+
 <!-- ===================== -->
 <!-- MODAL: FICHAR (PRO - 1 SOLO MODAL) -->
 <!-- ===================== -->
@@ -119,7 +161,7 @@ $cajaIdSesion = $_SESSION['caja_id'] ?? '';
       <div class="modal-row">
         <label class="modal-label">N° de empleado</label>
         <input id="ficharEmpleadoNum" type="text" class="modal-input" placeholder="Ej: 001"
-       onkeydown="if(event.key==='Enter') ficharCargar()">
+               onkeydown="if(event.key==='Enter') ficharCargar()">
       </div>
 
       <div class="modal-actions" style="justify-content:flex-end;">
@@ -143,8 +185,9 @@ $cajaIdSesion = $_SESSION['caja_id'] ?? '';
     </div>
   </div>
 </div>
+
 <!-- ===================== -->
-<!-- ESTILOS (si ya tenés estilos de modal, podés borrar esta parte) -->
+<!-- ESTILOS -->
 <!-- ===================== -->
 <style>
   .modal-backdrop{
@@ -190,6 +233,7 @@ $cajaIdSesion = $_SESSION['caja_id'] ?? '';
     border-radius: 10px;
     outline:none;
     font-size: 14px;
+    background:#fff;
   }
   .modal-actions{
     display:flex;
@@ -223,20 +267,73 @@ $cajaIdSesion = $_SESSION['caja_id'] ?? '';
     }
   }
 
+  // ✅ Cargar categorías de gasto (desde /cajero/categoriasGastoJson)
+  async function cargarCategoriasGasto(){
+    const sel = document.getElementById('gastoCategoria');
+    if(!sel) return;
+
+    // Cargar una sola vez (si querés que refresque siempre, borrá estas 2 líneas)
+    if(sel.dataset.loaded === '1') return;
+
+    sel.innerHTML = '<option value="">Cargando...</option>';
+
+    try{
+      const res = await fetch('<?= $ruta ?>/cajero/categoriasGastoJson', {
+        headers: { 'Accept': 'application/json' }
+      });
+      const data = await res.json();
+
+      if(!res.ok || !data || data.status !== 'ok') throw new Error();
+
+      sel.innerHTML = '<option value="">— Seleccionar —</option>';
+      (data.items || []).forEach(it => sel.add(new Option(it.nombre, it.id)));
+
+      sel.dataset.loaded = '1';
+    }catch(e){
+      sel.innerHTML = '<option value="">(No se pudieron cargar)</option>';
+      console.warn('No se pudieron cargar categorías de gasto');
+    }
+  }
+
   // ===== POPUP Gastos =====
   function abrirGastoModal() {
     const m = document.getElementById('gastoModal');
     if (!m) { console.warn("No existe #gastoModal"); return; }
+
+    cargarCategoriasGasto();
+    const sel = document.getElementById('gastoCategoria');
+    if (sel) sel.value = '';
+
     m.style.display = 'flex';
     setTimeout(() => {
-      const input = document.querySelector('#gastoModal input[name="motivo"]');
-      input?.focus();
+      sel?.focus();
     }, 150);
   }
   function cerrarGastoModal() {
     const m = document.getElementById('gastoModal');
     if (m) m.style.display = 'none';
   }
+  function abrirIngresoModal() {
+  const m = document.getElementById('ingresoModal');
+  if (!m) { console.warn("No existe #ingresoModal"); return; }
+  m.style.display = 'flex';
+  setTimeout(() => {
+    const input = document.querySelector('#ingresoModal input[name="monto"]');
+    input?.focus();
+  }, 150);
+}
+function cerrarIngresoModal() {
+  const m = document.getElementById('ingresoModal');
+  if (m) m.style.display = 'none';
+}
+
+// Click afuera para cerrar
+document.getElementById('ingresoModal')?.addEventListener('click', (e)=>{ if(e.target.id==='ingresoModal') cerrarIngresoModal(); });
+
+// ESC para cerrar
+window.addEventListener('keydown', function (e) {
+  if (e.key === "Escape") cerrarIngresoModal();
+});
 
   // ===== POPUP Abrir Caja =====
   function abrirCajaModal() {
@@ -260,6 +357,7 @@ $cajaIdSesion = $_SESSION['caja_id'] ?? '';
     const m = document.getElementById('abrirCajaModal');
     if (m) m.style.display = 'none';
   }
+  
 
   // ===== POPUP Caja Fuerte =====
   function abrirCajaFuerteModal() {
