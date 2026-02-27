@@ -860,13 +860,21 @@ function actualizarPinDisplay(){ for(let i=0;i<4;i++){ const d=document.getEleme
 function agregarDigitoPin(d){ if(pinActual.length>=4) return; pinActual+=d; actualizarPinDisplay(); document.getElementById('pinError').classList.remove('show'); if(pinActual.length===4) setTimeout(validarPin,120); }
 function borrarDigitoPin(){ pinActual=pinActual.slice(0,-1); actualizarPinDisplay(); document.getElementById('pinError').classList.remove('show'); }
 function validarPin(){
-  if(pinActual===ADMIN_PIN){ cerrarPinAdmin(); if(typeof pinDestinoCallback==='function') pinDestinoCallback(); }
-  else {
-    const dots=document.querySelectorAll('.pin-dot');
-    dots.forEach(d=>{ d.style.borderColor='var(--danger)'; d.style.background='rgba(231,76,60,0.15)'; });
-    document.getElementById('pinError').classList.add('show');
-    setTimeout(()=>{ dots.forEach(d=>{ d.style.borderColor=''; d.style.background=''; }); pinActual=''; actualizarPinDisplay(); }, 700);
+  if(pinActual === ADMIN_PIN){
+    const cb = pinDestinoCallback;   // 👈 guardo el callback ANTES de cerrar
+    cerrarPinAdmin();                // esto resetea variables, ok
+    if(typeof cb === 'function') cb(); // 👈 ahora sí, abre Herramientas
+    return;
   }
+
+  // error PIN
+  const dots = document.querySelectorAll('.pin-dot');
+  dots.forEach(d=>{ d.style.borderColor='var(--danger)'; d.style.background='rgba(231,76,60,0.15)'; });
+  document.getElementById('pinError').classList.add('show');
+  setTimeout(()=>{
+    dots.forEach(d=>{ d.style.borderColor=''; d.style.background=''; });
+    pinActual=''; actualizarPinDisplay();
+  }, 700);
 }
 document.querySelectorAll('.np-btn[data-n]').forEach(btn => btn.addEventListener('click', ()=>agregarDigitoPin(btn.dataset.n)));
 document.getElementById('pinDel')?.addEventListener('click', borrarDigitoPin);
@@ -879,17 +887,83 @@ document.getElementById('pinInput')?.addEventListener('keydown', e => {
 document.getElementById('closeAdminPin')?.addEventListener('click', cerrarPinAdmin);
 document.getElementById('modalAdminPin')?.addEventListener('click', function(e){ if(e.target===this) cerrarPinAdmin(); });
 
-// ---------- Herramientas ----------
-document.getElementById('btnHerramientas')?.addEventListener('click', e => { e.preventDefault(); abrirPinAdmin(()=>document.getElementById('modalHerramientas').classList.add('open')); });
-document.getElementById('closeHerramientas')?.addEventListener('click', ()=>document.getElementById('modalHerramientas').classList.remove('open'));
-document.getElementById('modalHerramientas')?.addEventListener('click', function(e){ if(e.target===this) this.classList.remove('open'); });
-document.getElementById('toolEstadisticas')?.addEventListener('click',  ()=>{ document.getElementById('modalHerramientas').classList.remove('open'); openOverlay(url('admin/estadisticas')); });
-document.getElementById('toolFichadas')?.addEventListener('click',      ()=>{ document.getElementById('modalHerramientas').classList.remove('open'); openOverlay(url('admin/fichadas')); });
-document.getElementById('toolPrecios')?.addEventListener('click',       ()=>{ document.getElementById('modalHerramientas').classList.remove('open'); openOverlay(url('admin/precios')); });
-document.getElementById('toolVentasProducto')?.addEventListener('click',()=>{ document.getElementById('modalHerramientas').classList.remove('open'); openOverlay(url('admin/ventas-producto')); });
-document.getElementById('toolGastos')?.addEventListener('click',        ()=>{ document.getElementById('modalHerramientas').classList.remove('open'); openOverlay(url('admin/gastos')); });
-document.getElementById('toolConfig')?.addEventListener('click',        ()=>{ document.getElementById('modalHerramientas').classList.remove('open'); openOverlay(url('admin/configuracion')); });
+// Helpers de modal (overlay)
+function openModal(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.style.display = 'flex';
+  el.classList.add('open'); // opcional, por si querés animaciones luego
+}
+function closeModal(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.classList.remove('open');
+  el.style.display = 'none';
+}
 
+// =======================
+// MODALES: helpers seguros
+// =======================
+function openModal(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.style.display = 'flex';
+  el.classList.add('open');
+}
+function closeModal(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.classList.remove('open');
+  el.style.display = 'none';
+}
+
+// =======================
+// HERRAMIENTAS (con PIN)
+// =======================
+document.getElementById('btnHerramientas')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  abrirPinAdmin(() => {
+    // Abrir el modal correcto
+    openModal('modalHerramientas');
+  });
+});
+
+// Cerrar herramientas
+document.getElementById('closeHerramientas')?.addEventListener('click', () => closeModal('modalHerramientas'));
+document.getElementById('modalHerramientas')?.addEventListener('click', function(e){
+  if(e.target === this) closeModal('modalHerramientas');
+});
+
+// Acciones dentro de herramientas (cierran modal y abren overlay)
+document.getElementById('toolEstadisticas')?.addEventListener('click', () => {
+  closeModal('modalHerramientas');
+  openOverlay(url('admin/estadisticas'));
+});
+
+document.getElementById('toolFichadas')?.addEventListener('click', () => {
+  closeModal('modalHerramientas');
+  openOverlay(url('admin/fichadas'));
+});
+
+document.getElementById('toolPrecios')?.addEventListener('click', () => {
+  closeModal('modalHerramientas');
+  openOverlay(url('admin/precios'));
+});
+
+document.getElementById('toolVentasProducto')?.addEventListener('click', () => {
+  closeModal('modalHerramientas');
+  openOverlay(url('admin/ventas-producto'));
+});
+
+document.getElementById('toolGastos')?.addEventListener('click', () => {
+  closeModal('modalHerramientas');
+  openOverlay(url('admin/gastos'));
+});
+
+document.getElementById('toolConfig')?.addEventListener('click', () => {
+  closeModal('modalHerramientas');
+  openOverlay(url('admin/configuracion'));
+});
 // ===== FICHAR =====
 let ficharEmpleadoId = null, ficharTimerInt = null;
 
