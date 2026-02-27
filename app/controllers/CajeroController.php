@@ -30,9 +30,7 @@ class CajeroController extends Controller {
 
     public function actionVistaCajero()
     {
-        if (session_status() === PHP_SESSION_NONE) {
-            session_start();
-        }
+        if (session_status() === PHP_SESSION_NONE) session_start();
 
         $footer = SiteController::footer();
         $head = SiteController::head();
@@ -86,97 +84,81 @@ class CajeroController extends Controller {
     }
 
     public function actionRegistrarGasto()
-{
-    if (session_status() === PHP_SESSION_NONE) session_start();
+    {
+        if (session_status() === PHP_SESSION_NONE) session_start();
 
-    // Helpers de salida (para POS)
-    $redirect  = $_POST['redirect'] ?? null;
-    $aceptaJson = (strpos($_SERVER['HTTP_ACCEPT'] ?? '', 'application/json') !== false);
-    $esAjax     = (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest');
+        $redirect   = $_POST['redirect'] ?? null;
+        $aceptaJson = (strpos($_SERVER['HTTP_ACCEPT'] ?? '', 'application/json') !== false);
+        $esAjax     = (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest');
 
-    // Solo POST
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            if ($redirect) { header("Location: " . $redirect); exit; }
+            header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
+            exit;
+        }
+
+        $motivo         = trim($_POST['motivo'] ?? '');
+        $monto          = floatval($_POST['monto'] ?? 0);
+        $autorizado_por = trim($_POST['autorizado_por'] ?? '');
+
+        $db = \DataBase::getInstance()->getConnection();
+
+        $usuario_id = null;
+        if (!empty($_SESSION['user_id']) && is_numeric($_SESSION['user_id'])) {
+            $usuario_id = (int)$_SESSION['user_id'];
+            $chk = $db->prepare("SELECT id FROM usuarios WHERE id = ? LIMIT 1");
+            $chk->execute([$usuario_id]);
+            if (!$chk->fetchColumn()) $usuario_id = null;
+        }
+
+        $caja_id = $_POST['caja_id'] ?? ($_SESSION['caja_id'] ?? null);
+
+        if ($motivo === '' || $monto <= 0 || $autorizado_por === '' || empty($caja_id)) {
+            if ($aceptaJson || $esAjax) {
+                header('Content-Type: application/json; charset=utf-8');
+                echo json_encode(['status' => 'error', 'message' => 'Faltan datos obligatorios para registrar el gasto']);
+                exit;
+            }
+            echo "<script>alert('Faltan datos obligatorios para registrar el gasto'); window.history.back();</script>";
+            exit;
+        }
+
+        $stmt = $db->prepare("
+            INSERT INTO gastos (fecha, monto, motivo, autorizado_por, usuario_id, caja_id)
+            VALUES (NOW(), ?, ?, ?, ?, ?)
+        ");
+        $stmt->execute([$monto, $motivo, $autorizado_por, $usuario_id, $caja_id]);
+
+        if ($aceptaJson || $esAjax) {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['status' => 'ok']);
+            exit;
+        }
+
         if ($redirect) { header("Location: " . $redirect); exit; }
         header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
         exit;
     }
 
-    $motivo         = trim($_POST['motivo'] ?? '');
-    $monto          = floatval($_POST['monto'] ?? 0);
-    $autorizado_por = trim($_POST['autorizado_por'] ?? '');
-
-    $db = \DataBase::getInstance()->getConnection();
-
-    // Usuario (modo dev sin login => NULL)
-    $usuario_id = null;
-    if (!empty($_SESSION['user_id']) && is_numeric($_SESSION['user_id'])) {
-        $usuario_id = (int)$_SESSION['user_id'];
-        $chk = $db->prepare("SELECT id FROM usuarios WHERE id = ? LIMIT 1");
-        $chk->execute([$usuario_id]);
-        if (!$chk->fetchColumn()) $usuario_id = null;
-    }
-
-    // Caja id
-    $caja_id = $_POST['caja_id'] ?? ($_SESSION['caja_id'] ?? null);
-
-    if ($motivo === '' || $monto <= 0 || $autorizado_por === '' || empty($caja_id)) {
-        if ($aceptaJson || $esAjax) {
-            header('Content-Type: application/json; charset=utf-8');
-            echo json_encode(['status' => 'error', 'message' => 'Faltan datos obligatorios para registrar el gasto']);
-            exit;
-        }
-        echo "<script>alert('Faltan datos obligatorios para registrar el gasto'); window.history.back();</script>";
-        exit;
-    }
-
-    // Insert gasto
-    $stmt = $db->prepare("
-        INSERT INTO gastos (fecha, monto, motivo, autorizado_por, usuario_id, caja_id)
-        VALUES (NOW(), ?, ?, ?, ?, ?)
-    ");
-    $stmt->execute([$monto, $motivo, $autorizado_por, $usuario_id, $caja_id]);
-
-    // ✅ Respuesta según contexto
-    if ($aceptaJson || $esAjax) {
-        header('Content-Type: application/json; charset=utf-8');
-        echo json_encode(['status' => 'ok']);
-        exit;
-    }
-
-    if ($redirect) {
-        header("Location: " . $redirect);
-        exit;
-    }
-
-    // fallback histórico
-    header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
-    exit;
-}
-
     public function actionCuentaMesa()
     {
-        if (!isset($_GET['id'])) {
-            echo "Mesa no especificada";
-            return;
-        }
+        if (!isset($_GET['id'])) { echo "Mesa no especificada"; return; }
 
         $mesaId = intval($_GET['id']);
-
         $pedidoModel = new \app\models\PedidoModel();
         $pedidos = $pedidoModel->obtenerPedidosActivosPorMesa($mesaId);
 
         $productos = [];
         $total = 0;
-
         foreach ($pedidos as $pedido) {
             foreach ($pedido['detalles'] as $detalle) {
                 $subtotal = $detalle['precio'] * $detalle['cantidad'];
                 $productos[] = [
-                    'nombre' => $detalle['nombre'],
+                    'nombre'      => $detalle['nombre'],
                     'descripcion' => $detalle['descripcion'],
-                    'precio' => $detalle['precio'],
-                    'cantidad' => $detalle['cantidad'],
-                    'subtotal' => $subtotal
+                    'precio'      => $detalle['precio'],
+                    'cantidad'    => $detalle['cantidad'],
+                    'subtotal'    => $subtotal
                 ];
                 $total += $subtotal;
             }
@@ -185,60 +167,57 @@ class CajeroController extends Controller {
         $mesaModel = new \app\models\MesaModel();
         $mesa = $mesaModel->obtenerPorId($mesaId);
 
-        $head = SiteController::head();
-        $nav = SiteController::nav();
+        $head   = SiteController::head();
+        $nav    = SiteController::nav();
         $footer = SiteController::footer();
 
         Response::render('cajero', 'cuenta', [
             'productos' => $productos,
-            'total' => $total,
-            'mesa' => $mesa,
-            'ruta' => \App::baseUrl(),
-            'head' => $head,
-            'nav' => $nav,
-            'footer' => $footer
+            'total'     => $total,
+            'mesa'      => $mesa,
+            'ruta'      => \App::baseUrl(),
+            'head'      => $head,
+            'nav'       => $nav,
+            'footer'    => $footer
         ]);
     }
 
     public function actionCuenta()
     {
-        $pedidoId = isset($_GET['id']) ? intval($_GET['id']) : null;
+        $pedidoId   = isset($_GET['id'])   ? intval($_GET['id'])   : null;
         $mesaNumero = isset($_GET['mesa']) ? intval($_GET['mesa']) : null;
 
-        $footer = SiteController::footer();
-        $head = SiteController::head();
-        $nav = SiteController::nav();
+        $footer      = SiteController::footer();
+        $head        = SiteController::head();
+        $nav         = SiteController::nav();
         $pedidoModel = new \app\models\PedidoModel();
 
         if ($pedidoId) {
-            $datos = $pedidoModel->obtenerDetalleCuentaPorPedido($pedidoId);
+            $datos           = $pedidoModel->obtenerDetalleCuentaPorPedido($pedidoId);
             $esCuentaCerrada = true;
         } elseif ($mesaNumero) {
             $mesaModel = new \app\models\MesaModel();
-            $mesa = $mesaModel->obtenerPorNumero($mesaNumero);
-            $mesaId = $mesa['id'] ?? null;
-
-            if ($mesaId) {
-                $datos = $pedidoModel->obtenerDetalleCuentaPorMesa($mesaId);
-            } else {
-                $datos = ['mesa' => [], 'productos' => [], 'total' => 0];
-            }
+            $mesa      = $mesaModel->obtenerPorNumero($mesaNumero);
+            $mesaId    = $mesa['id'] ?? null;
+            $datos     = $mesaId
+                ? $pedidoModel->obtenerDetalleCuentaPorMesa($mesaId)
+                : ['mesa' => [], 'productos' => [], 'total' => 0];
             $esCuentaCerrada = false;
         } else {
-            $datos = ['mesa' => [], 'productos' => [], 'total' => 0];
+            $datos           = ['mesa' => [], 'productos' => [], 'total' => 0];
             $esCuentaCerrada = true;
         }
 
         Response::render('cajero', 'cuenta', [
-            'head' => $head,
-            'title' => 'Cuenta',
-            'nav' => $nav,
-            'footer' => $footer,
-            'mesa' => $datos['mesa'],
-            'productos' => $datos['productos'],
-            'total' => $datos['total'],
-            'ruta' => \App::baseUrl(),
-            'esCuentaCerrada' => $esCuentaCerrada,
+            'head'           => $head,
+            'title'          => 'Cuenta',
+            'nav'            => $nav,
+            'footer'         => $footer,
+            'mesa'           => $datos['mesa'],
+            'productos'      => $datos['productos'],
+            'total'          => $datos['total'],
+            'ruta'           => \App::baseUrl(),
+            'esCuentaCerrada'=> $esCuentaCerrada,
         ]);
     }
 
@@ -246,7 +225,6 @@ class CajeroController extends Controller {
     {
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $mesaId = $_POST['mesa_id'] ?? null;
-
             if ($mesaId) {
                 $mesaModel = new \app\models\MesaModel();
                 $mesaModel->cerrarMesaYSolicitarCuenta($mesaId);
@@ -261,7 +239,7 @@ class CajeroController extends Controller {
     public function actionMarcarPagado()
     {
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $mesa_id = $_POST['mesa_id'] ?? null;
+            $mesa_id    = $_POST['mesa_id']    ?? null;
             $medio_pago = $_POST['medio_pago'] ?? null;
 
             if ($mesa_id && $medio_pago) {
@@ -284,18 +262,18 @@ class CajeroController extends Controller {
         if (session_status() === PHP_SESSION_NONE) session_start();
 
         $footer = \app\controllers\SiteController::footer();
-        $head = \app\controllers\SiteController::head();
-        $nav = \app\controllers\SiteController::nav();
-        $path = static::path();
+        $head   = \app\controllers\SiteController::head();
+        $nav    = \app\controllers\SiteController::nav();
+        $path   = static::path();
 
         $cajaId = $_SESSION['caja_id'] ?? null;
 
         if ($cajaId) {
             $cajaModel = new \app\models\CajaModel();
-            $datos = $cajaModel->obtenerTotalesDelDia();
+            $datos     = $cajaModel->obtenerTotalesDelDia();
             $productos = $cajaModel->resumenPorProducto();
-            $gastos = $cajaModel->obtenerGastosDelDia();
-            $datos['total_gastos'] = $gastos['total'];
+            $gastos    = $cajaModel->obtenerGastosDelDia();
+            $datos['total_gastos']    = $gastos['total'];
             $datos['cantidad_gastos'] = $gastos['cantidad'];
         } else {
             $datos = [
@@ -313,26 +291,26 @@ class CajeroController extends Controller {
         }
 
         \Response::render($this->viewDir(__NAMESPACE__), "planillaCaja", [
-            "title" => "Planilla de Caja",
-            "head" => $head,
-            "nav" => $nav,
-            "footer" => $footer,
-            "datos" => $datos,
+            "title"     => "Planilla de Caja",
+            "head"      => $head,
+            "nav"       => $nav,
+            "footer"    => $footer,
+            "datos"     => $datos,
             "productos" => $productos,
-            "ruta" => $path,
+            "ruta"      => $path,
         ]);
     }
 
     public function actionCambiarMedioPago()
     {
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $pedidoId = $_POST['pedido_id'] ?? null;
+            $pedidoId  = $_POST['pedido_id']  ?? null;
             $medioPago = $_POST['medio_pago'] ?? null;
 
             if ($pedidoId && $medioPago) {
-                $db = \DataBase::getInstance()->getConnection();
+                $db   = \DataBase::getInstance()->getConnection();
                 $stmt = $db->prepare("UPDATE pedidos SET metodo_pago = ? WHERE id = ?");
-                $ok = $stmt->execute([$medioPago, $pedidoId]);
+                $ok   = $stmt->execute([$medioPago, $pedidoId]);
                 echo $ok ? 'ok' : 'error';
                 return;
             }
@@ -346,14 +324,12 @@ class CajeroController extends Controller {
         if (session_status() === PHP_SESSION_NONE) session_start();
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $monto = floatval($_POST['monto'] ?? 0);
+            $monto       = floatval($_POST['monto'] ?? 0);
             $responsable = trim($_POST['responsable'] ?? '');
-
-            // ✅ Mejor: caja_id desde POST o desde sesión
-            $caja_id = $_POST['caja_id'] ?? ($_SESSION['caja_id'] ?? null);
+            $caja_id     = $_POST['caja_id'] ?? ($_SESSION['caja_id'] ?? null);
 
             if ($monto > 0 && !empty($responsable) && !empty($caja_id)) {
-                $db = \DataBase::getInstance()->getConnection();
+                $db   = \DataBase::getInstance()->getConnection();
                 $stmt = $db->prepare("INSERT INTO caja_fuerte (fecha, monto, responsable, caja_id) VALUES (NOW(), ?, ?, ?)");
                 $stmt->execute([$monto, $responsable, $caja_id]);
 
@@ -372,10 +348,9 @@ class CajeroController extends Controller {
     {
         if (session_status() === PHP_SESSION_NONE) session_start();
 
-        // ✅ Aceptar POST o GET (así tu modal puede ser POST)
         $monto = 0.0;
-        if (isset($_POST['monto'])) $monto = floatval($_POST['monto']);
-        elseif (isset($_GET['monto'])) $monto = floatval($_GET['monto']);
+        if (isset($_POST['monto']))     $monto = floatval($_POST['monto']);
+        elseif (isset($_GET['monto']))  $monto = floatval($_GET['monto']);
 
         if ($monto < 0 || $monto > 10000000) {
             $_SESSION['mensaje_error'] = "El monto debe ser entre 0 y 10.000.000.";
@@ -384,7 +359,7 @@ class CajeroController extends Controller {
         }
 
         $hoy = date('Y-m-d');
-        $db = \DataBase::getInstance()->getConnection();
+        $db  = \DataBase::getInstance()->getConnection();
 
         $stmt = $db->prepare("SELECT * FROM cajas WHERE DATE(fecha_apertura) = ? AND fecha_cierre IS NULL");
         $stmt->execute([$hoy]);
@@ -392,10 +367,9 @@ class CajeroController extends Controller {
 
         if ($cajaAbierta) {
             $_SESSION['caja_abierta'] = true;
-            $_SESSION['caja_id'] = $cajaAbierta['id'];
-            $_SESSION['caja_apertura'] = $cajaAbierta['fecha_apertura'];
-            $_SESSION['saldo_inicial'] = $cajaAbierta['saldo_inicial'];
-
+            $_SESSION['caja_id']      = $cajaAbierta['id'];
+            $_SESSION['caja_apertura']= $cajaAbierta['fecha_apertura'];
+            $_SESSION['saldo_inicial']= $cajaAbierta['saldo_inicial'];
             header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
             exit;
         }
@@ -405,41 +379,49 @@ class CajeroController extends Controller {
         $cajaId = $db->lastInsertId();
 
         $_SESSION['caja_abierta'] = true;
-        $_SESSION['caja_id'] = $cajaId;
-        $_SESSION['caja_apertura'] = date('Y-m-d H:i:s');
-        $_SESSION['saldo_inicial'] = $monto;
+        $_SESSION['caja_id']      = $cajaId;
+        $_SESSION['caja_apertura']= date('Y-m-d H:i:s');
+        $_SESSION['saldo_inicial']= $monto;
 
         header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
         exit;
     }
+
+    // ══════════════════════════════════════════════
+    //  FICHAR — Estado
+    // ══════════════════════════════════════════════
     public function actionFicharEstado()
-{
-    if (session_status() === PHP_SESSION_NONE) session_start();
-    header('Content-Type: application/json; charset=utf-8');
+    {
+        if (session_status() === PHP_SESSION_NONE) session_start();
+        header('Content-Type: application/json; charset=utf-8');
 
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        http_response_code(405);
-        echo json_encode(['status'=>'error','message'=>'Método no permitido']);
-        return;
-    }
-
-    $db = \DataBase::getInstance()->getConnection();
-    $payload = json_decode((string)file_get_contents('php://input'), true) ?: [];
-
-    $empleadoId = isset($payload['empleado_id']) ? (int)$payload['empleado_id'] : 0;
-    $empleadoNumero = isset($payload['empleado_numero']) ? trim((string)$payload['empleado_numero']) : '';
-
-    // Buscar empleado por número o por id
-    if ($empleadoId <= 0) {
-        if ($empleadoNumero === '') {
-            http_response_code(400);
-            echo json_encode(['status'=>'error','message'=>'Falta empleado_numero']);
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            http_response_code(405);
+            echo json_encode(['status'=>'error','message'=>'Método no permitido']);
             return;
         }
 
-        $st = $db->prepare("SELECT id, nombre FROM empleados WHERE numero_empleado = ? LIMIT 1");
-        $st->execute([$empleadoNumero]);
-        $emp = $st->fetch(\PDO::FETCH_ASSOC);
+        $db      = \DataBase::getInstance()->getConnection();
+        $payload = json_decode((string)file_get_contents('php://input'), true) ?: [];
+
+        $empleadoId     = isset($payload['empleado_id'])     ? (int)$payload['empleado_id']          : 0;
+        $empleadoNumero = isset($payload['empleado_numero']) ? trim((string)$payload['empleado_numero']) : '';
+
+        // Buscar empleado
+        if ($empleadoId <= 0) {
+            if ($empleadoNumero === '') {
+                http_response_code(400);
+                echo json_encode(['status'=>'error','message'=>'Falta empleado_numero']);
+                return;
+            }
+            $st = $db->prepare("SELECT id, nombre FROM empleados WHERE numero_empleado = ? LIMIT 1");
+            $st->execute([$empleadoNumero]);
+            $emp = $st->fetch(\PDO::FETCH_ASSOC);
+        } else {
+            $st = $db->prepare("SELECT id, nombre FROM empleados WHERE id = ? LIMIT 1");
+            $st->execute([$empleadoId]);
+            $emp = $st->fetch(\PDO::FETCH_ASSOC);
+        }
 
         if (!$emp) {
             http_response_code(404);
@@ -448,231 +430,230 @@ class CajeroController extends Controller {
         }
 
         $empleadoId = (int)$emp['id'];
-        $nombre = (string)$emp['nombre'];
-    } else {
-        $st = $db->prepare("SELECT id, nombre FROM empleados WHERE id = ? LIMIT 1");
-        $st->execute([$empleadoId]);
-        $emp = $st->fetch(\PDO::FETCH_ASSOC);
+        $nombre     = (string)$emp['nombre'];
+        $hoy        = date('Y-m-d');
 
-        if (!$emp) {
-            http_response_code(404);
-            echo json_encode(['status'=>'error','message'=>'Empleado no encontrado']);
-            return;
-        }
+        // Última fichada del día (cualquier tipo)
+        $stLast = $db->prepare("
+            SELECT tipo, fecha_hora
+            FROM fichadas
+            WHERE empleado_id = ? AND fecha = ?
+            ORDER BY fecha_hora DESC
+            LIMIT 1
+        ");
+        $stLast->execute([$empleadoId, $hoy]);
+        $ultima = $stLast->fetch(\PDO::FETCH_ASSOC);
 
-        $nombre = (string)$emp['nombre'];
-    }
+        // Última entrada del día
+        $stEnt = $db->prepare("
+            SELECT fecha_hora FROM fichadas
+            WHERE empleado_id = ? AND fecha = ? AND tipo = 'entrada'
+            ORDER BY fecha_hora DESC LIMIT 1
+        ");
+        $stEnt->execute([$empleadoId, $hoy]);
+        $entrada = $stEnt->fetchColumn();
 
-    $hoy = date('Y-m-d');
+        // Última salida del día
+        $stSal = $db->prepare("
+            SELECT fecha_hora FROM fichadas
+            WHERE empleado_id = ? AND fecha = ? AND tipo = 'salida'
+            ORDER BY fecha_hora DESC LIMIT 1
+        ");
+        $stSal->execute([$empleadoId, $hoy]);
+        $salida = $stSal->fetchColumn();
 
-    // Última entrada del día
-    $st = $db->prepare("
-        SELECT fecha_hora
-        FROM fichadas
-        WHERE empleado_id = ?
-          AND fecha = ?
-          AND tipo = 'entrada'
-        ORDER BY fecha_hora DESC
-        LIMIT 1
-    ");
-    $st->execute([$empleadoId, $hoy]);
-    $entrada = $st->fetchColumn();
+        $enTurno     = false;
+        $segundos    = 0;
+        $entradaHora = null;
+        $salidaHora  = null;
 
-    // Última salida del día
-    $st2 = $db->prepare("
-        SELECT fecha_hora
-        FROM fichadas
-        WHERE empleado_id = ?
-          AND fecha = ?
-          AND tipo = 'salida'
-        ORDER BY fecha_hora DESC
-        LIMIT 1
-    ");
-    $st2->execute([$empleadoId, $hoy]);
-    $salida = $st2->fetchColumn();
-
-    $enTurno = false;
-    $segundos = 0;
-    $entradaHora = null;
-
-    if ($entrada) {
-        if (!$salida || strtotime($salida) < strtotime($entrada)) {
-            $enTurno = true;
+        if ($entrada) {
             $entradaHora = date('H:i', strtotime($entrada));
-            $segundos = max(0, time() - strtotime($entrada));
-        }
-    }
 
-    echo json_encode([
-        'status' => 'ok',
-        'empleado_id' => $empleadoId,
-        'empleado_nombre' => $nombre,
-        'en_turno' => $enTurno,
-        'entrada_hora' => $entradaHora,
-        'segundos_trabajados' => $segundos
-    ]);
-}
-
-public function actionFicharRegistrar()
-{
-    if (session_status() === PHP_SESSION_NONE) session_start();
-    header('Content-Type: application/json; charset=utf-8');
-
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        http_response_code(405);
-        echo json_encode(['status'=>'error','message'=>'Método no permitido']);
-        return;
-    }
-
-    $payload = json_decode((string)file_get_contents('php://input'), true) ?: [];
-    $empleadoId = (int)($payload['empleado_id'] ?? 0);
-    $tipo = strtolower(trim((string)($payload['tipo'] ?? '')));
-
-    if ($empleadoId <= 0 || !in_array($tipo, ['entrada','salida'], true)) {
-        http_response_code(400);
-        echo json_encode(['status'=>'error','message'=>'Datos inválidos']);
-        return;
-    }
-
-    $db = \DataBase::getInstance()->getConnection();
-
-    // registrado_por: usuario logueado si existe, si no NULL
-    $registradoPor = null;
-    if (!empty($_SESSION['user_id']) && is_numeric($_SESSION['user_id'])) {
-        $registradoPor = (int)$_SESSION['user_id'];
-        $chk = $db->prepare("SELECT id FROM usuarios WHERE id = ? LIMIT 1");
-        $chk->execute([$registradoPor]);
-        if (!$chk->fetchColumn()) $registradoPor = null;
-    }
-
-    $negocioId = isset($_SESSION['negocio_id']) ? (int)$_SESSION['negocio_id'] : null;
-
-    $hoy = date('Y-m-d');
-    $ahora = date('Y-m-d H:i:s');
-
-    try {
-        $db->beginTransaction();
-
-        // Si es salida: calcular tiempo trabajado desde última entrada no cerrada
-        $tiempoMin = null;
-        if ($tipo === 'salida') {
-            $st = $db->prepare("
-                SELECT fecha_hora
-                FROM fichadas
-                WHERE empleado_id = ?
-                  AND fecha = ?
-                  AND tipo = 'entrada'
-                ORDER BY fecha_hora DESC
-                LIMIT 1
-            ");
-            $st->execute([$empleadoId, $hoy]);
-            $entrada = $st->fetchColumn();
-
-            $st2 = $db->prepare("
-                SELECT fecha_hora
-                FROM fichadas
-                WHERE empleado_id = ?
-                  AND fecha = ?
-                  AND tipo = 'salida'
-                ORDER BY fecha_hora DESC
-                LIMIT 1
-            ");
-            $st2->execute([$empleadoId, $hoy]);
-            $salida = $st2->fetchColumn();
-
-            if ($entrada && (!$salida || strtotime($salida) < strtotime($entrada))) {
-                $tiempoMin = (int) floor((strtotime($ahora) - strtotime($entrada)) / 60);
+            if (!$salida || strtotime($salida) < strtotime($entrada)) {
+                // En turno: la última fichada es entrada
+                $enTurno  = true;
+                $segundos = max(0, time() - strtotime($entrada));
+            } else {
+                // La última fichada es salida
+                $salidaHora = date('H:i', strtotime($salida));
             }
         }
 
-        $stmt = $db->prepare("
-            INSERT INTO fichadas
-              (negocio_id, empleado_id, tipo, fecha_hora, fecha, tardanza_min, es_tardanza, tiempo_trabajado_min, turno, registrado_por, notas)
-            VALUES
-              (?, ?, ?, ?, ?, NULL, 0, ?, 1, ?, NULL)
-        ");
-        $stmt->execute([
-            $negocioId,
-            $empleadoId,
-            $tipo,
-            $ahora,
-            $hoy,
-            $tiempoMin,
-            $registradoPor
+        echo json_encode([
+            'status'              => 'ok',
+            'empleado_id'         => $empleadoId,
+            'empleado_nombre'     => $nombre,
+            'en_turno'            => $enTurno,
+            'entrada_hora'        => $entradaHora,
+            'salida_hora'         => $salidaHora,
+            'segundos_trabajados' => $segundos,
         ]);
-
-        $db->commit();
-        echo json_encode(['status'=>'ok']);
-        return;
-
-    } catch (\Throwable $e) {
-        if ($db->inTransaction()) $db->rollBack();
-        http_response_code(500);
-        echo json_encode(['status'=>'error','message'=>$e->getMessage()]);
-        return;
-    }
-}
-    public function actionFichar()
-{
-    if (session_status() === PHP_SESSION_NONE) session_start();
-
-    // Solo POST
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        header("Location: " . \App::baseUrl() . "/pos");
-        exit;
     }
 
-    $accion = strtolower(trim($_POST['accion'] ?? ''));
-    $obs    = trim($_POST['obs'] ?? '');
-    $redirect = $_POST['redirect'] ?? (\App::baseUrl() . "/pos");
+    // ══════════════════════════════════════════════
+    //  FICHAR — Registrar entrada o salida
+    // ══════════════════════════════════════════════
+    public function actionFicharRegistrar()
+    {
+        if (session_status() === PHP_SESSION_NONE) session_start();
+        header('Content-Type: application/json; charset=utf-8');
 
-    if (!in_array($accion, ['entrada', 'salida'], true)) {
-        $_SESSION['mensaje_error'] = "Acción inválida para fichar.";
-        header("Location: " . $redirect);
-        exit;
-    }
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            http_response_code(405);
+            echo json_encode(['status'=>'error','message'=>'Método no permitido']);
+            return;
+        }
 
-    $db = \DataBase::getInstance()->getConnection();
+        $payload    = json_decode((string)file_get_contents('php://input'), true) ?: [];
+        $empleadoId = (int)($payload['empleado_id'] ?? 0);
+        $tipo       = strtolower(trim((string)($payload['tipo'] ?? '')));
 
-    // Usuario (modo dev sin login => NULL)
-    $usuario_id = null;
-    if (!empty($_SESSION['user_id']) && is_numeric($_SESSION['user_id'])) {
-        $usuario_id = (int)$_SESSION['user_id'];
-        $chk = $db->prepare("SELECT id FROM usuarios WHERE id = ? LIMIT 1");
-        $chk->execute([$usuario_id]);
-        if (!$chk->fetchColumn()) $usuario_id = null;
-    }
+        if ($empleadoId <= 0 || !in_array($tipo, ['entrada','salida'], true)) {
+            http_response_code(400);
+            echo json_encode(['status'=>'error','message'=>'Datos inválidos']);
+            return;
+        }
 
-    // Negocio si lo usás (si no existe, queda 1)
-    $negocio_id = (int)($_SESSION['negocio_id'] ?? 1);
+        $db  = \DataBase::getInstance()->getConnection();
+        $hoy = date('Y-m-d');
 
-    try {
-        // Si tu tabla se llama distinto, decime y lo ajusto
-        $stmt = $db->prepare("
-            INSERT INTO fichadas (fecha, accion, observacion, usuario_id, negocio_id)
-            VALUES (NOW(), ?, ?, ?, ?)
+        // ── Validar que no repita el mismo tipo consecutivo ──
+        $stCheck = $db->prepare("
+            SELECT tipo FROM fichadas
+            WHERE empleado_id = ? AND fecha = ?
+            ORDER BY fecha_hora DESC
+            LIMIT 1
         ");
-        $stmt->execute([$accion, ($obs !== '' ? $obs : null), $usuario_id, $negocio_id]);
+        $stCheck->execute([$empleadoId, $hoy]);
+        $ultimoTipo = $stCheck->fetchColumn();
 
-        $_SESSION['mensaje_exito'] = "Fichada registrada.";
-        header("Location: " . $redirect);
-        exit;
+        if ($ultimoTipo === $tipo) {
+            http_response_code(409);
+            echo json_encode([
+                'status'  => 'error',
+                'message' => $tipo === 'salida'
+                    ? 'Ya fichaste salida. Debés fichar entrada primero.'
+                    : 'Ya estás en turno. Debés fichar salida primero.'
+            ]);
+            return;
+        }
 
-    } catch (\Throwable $e) {
-        // Si no existe la tabla, te lo va a decir acá
-        $_SESSION['mensaje_error'] = "Error al fichar: " . $e->getMessage();
-        header("Location: " . $redirect);
-        exit;
+        // registrado_por
+        $registradoPor = null;
+        if (!empty($_SESSION['user_id']) && is_numeric($_SESSION['user_id'])) {
+            $registradoPor = (int)$_SESSION['user_id'];
+            $chk = $db->prepare("SELECT id FROM usuarios WHERE id = ? LIMIT 1");
+            $chk->execute([$registradoPor]);
+            if (!$chk->fetchColumn()) $registradoPor = null;
+        }
+
+        $negocioId = isset($_SESSION['negocio_id']) ? (int)$_SESSION['negocio_id'] : null;
+        $ahora     = date('Y-m-d H:i:s');
+
+        // Calcular tiempo trabajado si es salida
+        $tiempoMin = null;
+        if ($tipo === 'salida') {
+            $stEnt = $db->prepare("
+                SELECT fecha_hora FROM fichadas
+                WHERE empleado_id = ? AND fecha = ? AND tipo = 'entrada'
+                ORDER BY fecha_hora DESC LIMIT 1
+            ");
+            $stEnt->execute([$empleadoId, $hoy]);
+            $ultimaEntrada = $stEnt->fetchColumn();
+
+            if ($ultimaEntrada) {
+                $tiempoMin = (int) floor((strtotime($ahora) - strtotime($ultimaEntrada)) / 60);
+            }
+        }
+
+        try {
+            $db->beginTransaction();
+
+            $stmt = $db->prepare("
+                INSERT INTO fichadas
+                  (negocio_id, empleado_id, tipo, fecha_hora, fecha, tardanza_min, es_tardanza, tiempo_trabajado_min, turno, registrado_por, notas)
+                VALUES
+                  (?, ?, ?, ?, ?, NULL, 0, ?, 1, ?, NULL)
+            ");
+            $stmt->execute([
+                $negocioId,
+                $empleadoId,
+                $tipo,
+                $ahora,
+                $hoy,
+                $tiempoMin,
+                $registradoPor
+            ]);
+
+            $db->commit();
+            echo json_encode(['status' => 'ok']);
+            return;
+
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            http_response_code(500);
+            echo json_encode(['status'=>'error','message'=>$e->getMessage()]);
+            return;
+        }
     }
-}
-    public function actionCerrarCaja() {
+
+    public function actionFichar()
+    {
+        if (session_status() === PHP_SESSION_NONE) session_start();
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            header("Location: " . \App::baseUrl() . "/pos");
+            exit;
+        }
+
+        $accion   = strtolower(trim($_POST['accion'] ?? ''));
+        $obs      = trim($_POST['obs'] ?? '');
+        $redirect = $_POST['redirect'] ?? (\App::baseUrl() . "/pos");
+
+        if (!in_array($accion, ['entrada', 'salida'], true)) {
+            $_SESSION['mensaje_error'] = "Acción inválida para fichar.";
+            header("Location: " . $redirect);
+            exit;
+        }
+
+        $db         = \DataBase::getInstance()->getConnection();
+        $usuario_id = null;
+        if (!empty($_SESSION['user_id']) && is_numeric($_SESSION['user_id'])) {
+            $usuario_id = (int)$_SESSION['user_id'];
+            $chk = $db->prepare("SELECT id FROM usuarios WHERE id = ? LIMIT 1");
+            $chk->execute([$usuario_id]);
+            if (!$chk->fetchColumn()) $usuario_id = null;
+        }
+
+        $negocio_id = (int)($_SESSION['negocio_id'] ?? 1);
+
+        try {
+            $stmt = $db->prepare("
+                INSERT INTO fichadas (fecha, accion, observacion, usuario_id, negocio_id)
+                VALUES (NOW(), ?, ?, ?, ?)
+            ");
+            $stmt->execute([$accion, ($obs !== '' ? $obs : null), $usuario_id, $negocio_id]);
+
+            $_SESSION['mensaje_exito'] = "Fichada registrada.";
+            header("Location: " . $redirect);
+            exit;
+        } catch (\Throwable $e) {
+            $_SESSION['mensaje_error'] = "Error al fichar: " . $e->getMessage();
+            header("Location: " . $redirect);
+            exit;
+        }
+    }
+
+    public function actionCerrarCaja()
+    {
         if (session_status() === PHP_SESSION_NONE) session_start();
 
         try {
-            $cajaModel = new \app\models\CajaModel();
-            $usuarioId = $_SESSION['user_id'] ?? null;
-            $datos = $cajaModel->obtenerTotalesDelDia();
-            $saldoCierre = $datos['saldo'];
+            $cajaModel  = new \app\models\CajaModel();
+            $usuarioId  = $_SESSION['user_id'] ?? null;
+            $datos      = $cajaModel->obtenerTotalesDelDia();
+            $saldoCierre= $datos['saldo'];
 
             $exito = $cajaModel->cerrarCajaDelDia($usuarioId, null, $saldoCierre);
 
@@ -695,7 +676,7 @@ public function actionFicharRegistrar()
         if (session_status() === PHP_SESSION_NONE) session_start();
         $db = \DataBase::getInstance()->getConnection();
 
-        $cajaId = $_SESSION['caja_id'] ?? null;
+        $cajaId           = $_SESSION['caja_id'] ?? null;
         $fechaSeleccionada = $_GET['fecha'] ?? date('Y-m-d');
 
         if (!$cajaId) {
@@ -704,21 +685,22 @@ public function actionFicharRegistrar()
             $cajaId = $stmt->fetchColumn();
         }
 
-        $inicioCaja = 0;
+        $inicioCaja   = 0;
         $fechaApertura = '';
         if ($cajaId) {
             $stmt = $db->prepare("SELECT saldo_inicial, fecha_apertura FROM cajas WHERE id = ?");
             $stmt->execute([$cajaId]);
-            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-            $inicioCaja = $row['saldo_inicial'] ?? 0;
+            $row           = $stmt->fetch(\PDO::FETCH_ASSOC);
+            $inicioCaja    = $row['saldo_inicial'] ?? 0;
             $fechaApertura = $row['fecha_apertura'] ?? '';
         }
 
-        // Ventas del día (por fecha seleccionada)
-        $stmt = $db->prepare("SELECT p.id, p.total, p.metodo_pago, p.mesa_id, p.fecha, p.fecha_cierre
+        $stmt = $db->prepare("
+            SELECT p.id, p.total, p.metodo_pago, p.mesa_id, p.fecha, p.fecha_cierre
             FROM pedidos p
             WHERE p.caja_id = ? AND p.cerrado = 1
-              AND DATE(COALESCE(p.fecha_cierre, p.fecha)) = ?");
+              AND DATE(COALESCE(p.fecha_cierre, p.fecha)) = ?
+        ");
         $stmt->execute([$cajaId, $fechaSeleccionada]);
         $ventas = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
@@ -730,7 +712,7 @@ public function actionFicharRegistrar()
         $stmt->execute([$cajaId, $fechaSeleccionada]);
         $cajaFuerte = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
-        $cacheMesas = [];
+        $cacheMesas   = [];
         $getNumeroMesa = function($mesaId) use (&$cacheMesas, $db) {
             if (!$mesaId) return '';
             if (isset($cacheMesas[$mesaId])) return $cacheMesas[$mesaId];
@@ -741,128 +723,117 @@ public function actionFicharRegistrar()
             return $cacheMesas[$mesaId];
         };
 
-        $movimientos = [];
+        $movimientos   = [];
         $movimientos[] = [
-            'tipo' => 'inicio',
-            'detalle' => "INICIO DE CAJA",
-            'efectivo' => $inicioCaja,
-            'tarjeta' => '',
-            'qr' => '',
-            'mp' => '',
-            'total' => $inicioCaja,
-            'mesa' => '',
-            'fecha_hora' => $fechaApertura ? date('Y-m-d H:i', strtotime($fechaApertura)) : $fechaSeleccionada . ' 08:00',
-            'clase_efectivo' => 'entrada',
+            'tipo'          => 'inicio',
+            'detalle'       => "INICIO DE CAJA",
+            'efectivo'      => $inicioCaja,
+            'tarjeta'       => '',
+            'qr'            => '',
+            'mp'            => '',
+            'total'         => $inicioCaja,
+            'mesa'          => '',
+            'fecha_hora'    => $fechaApertura ? date('Y-m-d H:i', strtotime($fechaApertura)) : $fechaSeleccionada . ' 08:00',
+            'clase_efectivo'=> 'entrada',
             'clase_tarjeta' => '',
-            'clase_qr' => '',
-            'clase_mp' => '',
-            'clase_total' => 'entrada',
-            'ticket_url' => ''
+            'clase_qr'      => '',
+            'clase_mp'      => '',
+            'clase_total'   => 'entrada',
+            'ticket_url'    => ''
         ];
 
-        // Cache de pagos por pedido (para dividido)
-        $stmtPagos = $db->prepare("\n            SELECT mp.clave, SUM(pp.monto) as monto\n            FROM pedido_pagos pp\n            JOIN metodos_pago mp ON mp.id = pp.metodo_pago_id\n            WHERE pp.pedido_id = ?\n            GROUP BY mp.clave\n        ");
+        $stmtPagos = $db->prepare("
+            SELECT mp.clave, SUM(pp.monto) as monto
+            FROM pedido_pagos pp
+            JOIN metodos_pago mp ON mp.id = pp.metodo_pago_id
+            WHERE pp.pedido_id = ?
+            GROUP BY mp.clave
+        ");
 
         foreach ($ventas as $v) {
             $detalle = "TICKET #" . str_pad($v['id'], 4, '0', STR_PAD_LEFT);
-            $metodo = strtolower((string)$v['metodo_pago']);
-
-            $ef = '';
-            $tj = '';
-            $qr = '';
-            $mp = '';
+            $metodo  = strtolower((string)$v['metodo_pago']);
+            $ef = $tj = $qr = $mp = '';
 
             if ($metodo === 'dividido') {
                 $stmtPagos->execute([$v['id']]);
-                $rows = $stmtPagos->fetchAll(\PDO::FETCH_ASSOC);
-                foreach ($rows as $r) {
+                foreach ($stmtPagos->fetchAll(\PDO::FETCH_ASSOC) as $r) {
                     $clave = strtolower((string)($r['clave'] ?? ''));
                     $monto = $r['monto'] ?? 0;
-                    if ($clave === 'efectivo') $ef = $monto;
-                    if ($clave === 'tarjeta') $tj = $monto;
-                    if ($clave === 'qr') $qr = $monto;
+                    if ($clave === 'efectivo')    $ef = $monto;
+                    if ($clave === 'tarjeta')     $tj = $monto;
+                    if ($clave === 'qr')          $qr = $monto;
                     if ($clave === 'mercadopago') $mp = $monto;
                 }
             } else {
-                // pago simple
-                if ($metodo === 'efectivo') $ef = $v['total'];
-                if ($metodo === 'tarjeta') $tj = $v['total'];
-                if ($metodo === 'qr') $qr = $v['total'];
+                if ($metodo === 'efectivo')    $ef = $v['total'];
+                if ($metodo === 'tarjeta')     $tj = $v['total'];
+                if ($metodo === 'qr')          $qr = $v['total'];
                 if ($metodo === 'mercadopago') $mp = $v['total'];
             }
 
-            $fechaMov = $v['fecha_cierre'] ?: $v['fecha'];
+            $fechaMov      = $v['fecha_cierre'] ?: $v['fecha'];
             $movimientos[] = [
-                'tipo' => 'venta',
-                'detalle' => $detalle,
-                'efectivo' => $ef,
-                'tarjeta' => $tj,
-                'qr' => $qr,
-                'mp' => $mp,
-                'total' => $v['total'],
-                'mesa' => $getNumeroMesa($v['mesa_id']),
-                'fecha_hora' => date('Y-m-d H:i', strtotime($fechaMov)),
-                'clase_efectivo' => $ef !== '' ? 'venta' : '',
+                'tipo'          => 'venta',
+                'detalle'       => $detalle,
+                'efectivo'      => $ef,
+                'tarjeta'       => $tj,
+                'qr'            => $qr,
+                'mp'            => $mp,
+                'total'         => $v['total'],
+                'mesa'          => $getNumeroMesa($v['mesa_id']),
+                'fecha_hora'    => date('Y-m-d H:i', strtotime($fechaMov)),
+                'clase_efectivo'=> $ef !== '' ? 'venta' : '',
                 'clase_tarjeta' => $tj !== '' ? 'venta' : '',
-                'clase_qr' => $qr !== '' ? 'venta' : '',
-                'clase_mp' => $mp !== '' ? 'venta' : '',
-                'clase_total' => 'venta',
-                'ticket_url' => \App::baseUrl() . '/cajero/cuenta?id=' . $v['id']
+                'clase_qr'      => $qr !== '' ? 'venta' : '',
+                'clase_mp'      => $mp !== '' ? 'venta' : '',
+                'clase_total'   => 'venta',
+                'ticket_url'    => \App::baseUrl() . '/cajero/cuenta?id=' . $v['id']
             ];
         }
 
         foreach ($cajaFuerte as $cf) {
-            $montoCf = -abs($cf['monto']);
+            $montoCf       = -abs($cf['monto']);
             $movimientos[] = [
-                'tipo' => 'caja_fuerte',
-                'detalle' => "Depósito Caja Fuerte (".$cf['responsable'].")",
-                'efectivo' => $montoCf,
-                'tarjeta' => '',
-                'qr' => '',
-                'mp' => '',
-                'total' => $montoCf,
-                'mesa' => '',
-                'fecha_hora' => date('Y-m-d H:i', strtotime($cf['fecha'])),
-                'clase_efectivo' => 'egreso',
-                'clase_tarjeta' => '',
-                'clase_qr' => '',
-                'clase_mp' => '',
-                'clase_total' => 'egreso',
-                'ticket_url' => ''
+                'tipo'          => 'caja_fuerte',
+                'detalle'       => "Depósito Caja Fuerte (" . $cf['responsable'] . ")",
+                'efectivo'      => $montoCf,
+                'tarjeta'       => '', 'qr' => '', 'mp' => '',
+                'total'         => $montoCf,
+                'mesa'          => '',
+                'fecha_hora'    => date('Y-m-d H:i', strtotime($cf['fecha'])),
+                'clase_efectivo'=> 'egreso',
+                'clase_tarjeta' => '', 'clase_qr' => '', 'clase_mp' => '',
+                'clase_total'   => 'egreso',
+                'ticket_url'    => ''
             ];
         }
 
         foreach ($gastos as $g) {
             $movimientos[] = [
-                'tipo' => 'gasto',
-                'detalle' => "GASTO: ".$g['motivo'].($g['autorizado_por'] ? " (aut: ".$g['autorizado_por'].")" : ""),
-                'efectivo' => -abs($g['monto']),
-                'tarjeta' => '',
-                'qr' => '',
-                'mp' => '',
-                'total' => -abs($g['monto']),
-                'mesa' => '',
-                'fecha_hora' => date('Y-m-d H:i', strtotime($g['fecha'])),
-                'clase_efectivo' => 'egreso',
-                'clase_tarjeta' => '',
-                'clase_qr' => '',
-                'clase_mp' => '',
-                'clase_total' => 'egreso',
-                'ticket_url' => ''
+                'tipo'          => 'gasto',
+                'detalle'       => "GASTO: " . $g['motivo'] . ($g['autorizado_por'] ? " (aut: " . $g['autorizado_por'] . ")" : ""),
+                'efectivo'      => -abs($g['monto']),
+                'tarjeta'       => '', 'qr' => '', 'mp' => '',
+                'total'         => -abs($g['monto']),
+                'mesa'          => '',
+                'fecha_hora'    => date('Y-m-d H:i', strtotime($g['fecha'])),
+                'clase_efectivo'=> 'egreso',
+                'clase_tarjeta' => '', 'clase_qr' => '', 'clase_mp' => '',
+                'clase_total'   => 'egreso',
+                'ticket_url'    => ''
             ];
         }
 
-        usort($movimientos, function($a, $b) {
-            return strcmp($a['fecha_hora'], $b['fecha_hora']);
-        });
+        usort($movimientos, fn($a, $b) => strcmp($a['fecha_hora'], $b['fecha_hora']));
 
         $totales = ['efectivo' => 0, 'tarjeta' => 0, 'qr' => 0, 'mp' => 0, 'total' => 0];
-        foreach($movimientos as $m) {
+        foreach ($movimientos as $m) {
             $totales['efectivo'] += floatval($m['efectivo'] ?: 0);
-            $totales['tarjeta'] += floatval($m['tarjeta'] ?: 0);
-            $totales['qr']      += floatval($m['qr'] ?: 0);
-            $totales['mp']      += floatval($m['mp'] ?: 0);
-            $totales['total']   += floatval($m['total'] ?: 0);
+            $totales['tarjeta']  += floatval($m['tarjeta']  ?: 0);
+            $totales['qr']       += floatval($m['qr']       ?: 0);
+            $totales['mp']       += floatval($m['mp']       ?: 0);
+            $totales['total']    += floatval($m['total']    ?: 0);
         }
 
         require __DIR__ . '/../views/cajero/libroDiario.php';
