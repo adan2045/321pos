@@ -118,7 +118,8 @@ $cajaIdSesion = $_SESSION['caja_id'] ?? '';
     <div class="modal-body">
       <div class="modal-row">
         <label class="modal-label">N° de empleado</label>
-        <input id="ficharEmpleadoNum" type="text" class="modal-input" placeholder="Ej: 001">
+        <input id="ficharEmpleadoNum" type="text" class="modal-input" placeholder="Ej: 001"
+       onkeydown="if(event.key==='Enter') ficharCargar()">
       </div>
 
       <div class="modal-actions" style="justify-content:flex-end;">
