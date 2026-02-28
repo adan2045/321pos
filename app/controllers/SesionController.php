@@ -40,10 +40,10 @@ class SesionController
         session_start();
     }
 
-    session_unset();  // limpia las variables de sesión
-    session_destroy(); // destruye la sesión
+    session_unset();
+    session_destroy();
 
-    header("Location: " . self::$ruta . "/admin/gestion");
+    header("Location: " . \App::baseUrl() . "/login/login");
     exit;
 }
 }

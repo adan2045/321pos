@@ -1017,14 +1017,18 @@ async function ficharCargar(){
     if(b1) b1.disabled=false; if(b2) b2.disabled=true;
     stopFicharTimer(); renderTimer(0);
     document.getElementById('ficharTimer').textContent='';
-    const [hE,mE]=data.entrada_hora.split(':').map(Number);
-    const [hS,mS]=data.salida_hora.split(':').map(Number);
-    const totalMin=(hS*60+mS)-(hE*60+mE);
-    if(estado) estado.innerHTML=`Último turno — Entrada: <strong>${data.entrada_hora}</strong> &nbsp;|&nbsp; Salida: <strong>${data.salida_hora}</strong>`;
-    const resumen=document.createElement('div');
-    resumen.id='ficharResumen'; resumen.style.cssText='margin-top:8px; font-size:14px; color:#374151;';
-    resumen.innerHTML=`⏱ Tiempo trabajado: <strong>${String(Math.floor(totalMin/60)).padStart(2,'0')}:${String(totalMin%60).padStart(2,'0')}</strong>`;
-    document.getElementById('ficharTimer').after(resumen);
+
+    // Preferimos lo que calcule el backend (más confiable)
+    const hhmm = data.tiempo_trabajado_hhmm || (()=>{
+      const [hE,mE]=data.entrada_hora.split(':').map(Number);
+      const [hS,mS]=data.salida_hora.split(':').map(Number);
+      let totalMin=(hS*60+mS)-(hE*60+mE);
+      if(!isFinite(totalMin) || totalMin < 0) totalMin = 0;
+      return String(Math.floor(totalMin/60)).padStart(2,'0')+':'+String(totalMin%60).padStart(2,'0');
+    })();
+
+    const leyenda = data.leyenda_ultimo_turno || `Ingreso ${data.entrada_hora} | Salida ${data.salida_hora} | Tiempo trabajado ${hhmm}`;
+    if(estado) estado.innerHTML = leyenda;
   } else {
     if(b1) b1.disabled=false; if(b2) b2.disabled=true;
     stopFicharTimer(); renderTimer(0);

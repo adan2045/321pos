@@ -30,7 +30,7 @@ class CajaModel
     $fila = $stmt->fetch(\PDO::FETCH_ASSOC);
     return $fila ? floatval($fila['saldo_inicial']) : 0.0;
 }
-    // Totales del día agrupados por método de pago, usando SOLO pedidos cerrados
+    // Totales del día agrupados por método de pago, con soporte correcto para pagos divididos
     public function obtenerTotalesDelDia($fecha = null)
 {
     $fechaHoy = $fecha ?: date('Y-m-d');
@@ -39,62 +39,96 @@ class CajaModel
     if (session_status() === PHP_SESSION_NONE) session_start();
     $cajaId = isset($_SESSION['caja_id']) ? $_SESSION['caja_id'] : null;
     if (!$cajaId) {
-        // Si no está en sesión, buscar el último id de caja abierta en la fecha
-        $stmt = $this->db->prepare("SELECT id FROM cajas WHERE DATE(fecha_apertura) = :fechaHoy ORDER BY fecha_apertura DESC LIMIT 1");
-        $stmt->execute(['fechaHoy' => $fechaHoy]);
+        $stmt = $this->db->prepare("SELECT id FROM cajas WHERE fecha_cierre IS NULL ORDER BY fecha_apertura DESC LIMIT 1");
+        $stmt->execute();
         $cajaId = $stmt->fetchColumn();
-    }
-
-    // 2. ¿Todos los pedidos de hoy ya tienen caja_id?
-    $allPedidosTienenCajaId = false;
-    if ($cajaId) {
-        $sqlCheck = "SELECT COUNT(*) as sinCaja FROM pedidos WHERE DATE(fecha) = :fechaHoy AND caja_id IS NULL";
-        $stmt = $this->db->prepare($sqlCheck);
-        $stmt->execute(['fechaHoy' => $fechaHoy]);
-        $sinCaja = $stmt->fetchColumn();
-        $allPedidosTienenCajaId = ($sinCaja == 0);
-    }
-
-    // 3. SUMAR SEGÚN CAJA O FECHA SEGÚN DISPONIBILIDAD
-    $wherePedidos = $allPedidosTienenCajaId && $cajaId
-        ? "caja_id = :cajaId"
-        : "DATE(fecha) = :fechaHoy";
-
-    $param = $allPedidosTienenCajaId && $cajaId
-        ? ['cajaId' => $cajaId]
-        : ['fechaHoy' => $fechaHoy];
-
-    // SUMA pedidos cerrados por método de pago
-    $sql = "SELECT metodo_pago, SUM(total) as total, COUNT(*) as cantidad
-            FROM pedidos
-            WHERE cerrado = 1 AND $wherePedidos
-            GROUP BY metodo_pago";
-    $stmt = $this->db->prepare($sql);
-    $stmt->execute($param);
-    $resultados = $stmt->fetchAll(\PDO::FETCH_ASSOC);
-
-    $pagos = [
-        'efectivo'     => ['total' => 0, 'cantidad' => 0],
-        'tarjeta'      => ['total' => 0, 'cantidad' => 0],
-        'mercadopago'  => ['total' => 0, 'cantidad' => 0],
-        'qr'           => ['total' => 0, 'cantidad' => 0]
-    ];
-
-    foreach ($resultados as $row) {
-        $metodo = strtolower(trim($row['metodo_pago'] ?? ''));
-        if (isset($pagos[$metodo])) {
-            $pagos[$metodo]['total'] = $row['total'];
-            $pagos[$metodo]['cantidad'] = $row['cantidad'];
+        if (!$cajaId) {
+            $stmt = $this->db->prepare("SELECT id FROM cajas WHERE DATE(fecha_apertura) = :fechaHoy ORDER BY fecha_apertura DESC LIMIT 1");
+            $stmt->execute(['fechaHoy' => $fechaHoy]);
+            $cajaId = $stmt->fetchColumn();
         }
     }
 
-    // Total general del día
+    // 2. Filtro base: siempre por caja si tenemos cajaId
+    $wherePedidos = $cajaId ? "p.caja_id = :cajaId AND p.cerrado = 1" : "DATE(p.fecha) = :fechaHoy AND p.cerrado = 1";
+    $param        = $cajaId ? ['cajaId' => $cajaId] : ['fechaHoy' => $fechaHoy];
+
+    // 3. Total general (todos los pedidos cerrados de esta caja)
     $sqlTotal = "SELECT COALESCE(SUM(total), 0) as venta_bruta, COUNT(*) as cantidad_pedidos
-                 FROM pedidos
-                 WHERE cerrado = 1 AND $wherePedidos";
+                 FROM pedidos p
+                 WHERE $wherePedidos";
     $stmt = $this->db->prepare($sqlTotal);
     $stmt->execute($param);
     $datos = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+    // 4. Sumar por método de pago usando pedido_pagos (cubre divididos + simples)
+    //    Si el pedido tiene registros en pedido_pagos, usamos esos montos.
+    //    Si no (pedidos viejos), usamos el total del pedido con su metodo_pago.
+    $pagos = [
+        'efectivo'    => 0.0,
+        'tarjeta'     => 0.0,
+        'mercadopago' => 0.0,
+        'qr'          => 0.0,
+    ];
+    $cantidades = [
+        'efectivo'    => 0,
+        'tarjeta'     => 0,
+        'mercadopago' => 0,
+        'qr'          => 0,
+    ];
+
+    // Pedidos con pagos detallados en pedido_pagos
+    $sqlPP = "SELECT mp.clave, COALESCE(SUM(pp.monto), 0) as total, COUNT(DISTINCT p.id) as cantidad
+              FROM pedidos p
+              JOIN pedido_pagos pp ON pp.pedido_id = p.id
+              JOIN metodos_pago mp ON mp.id = pp.metodo_pago_id
+              WHERE $wherePedidos
+              GROUP BY mp.clave";
+    $stmtPP = $this->db->prepare($sqlPP);
+    $stmtPP->execute($param);
+    $conDetalle = $stmtPP->fetchAll(\PDO::FETCH_ASSOC);
+
+    // IDs de pedidos que ya tienen pedido_pagos
+    $sqlIds = "SELECT DISTINCT p.id FROM pedidos p JOIN pedido_pagos pp ON pp.pedido_id = p.id WHERE $wherePedidos";
+    $stmtIds = $this->db->prepare($sqlIds);
+    $stmtIds->execute($param);
+    $idsConPagos = $stmtIds->fetchAll(\PDO::FETCH_COLUMN, 0);
+
+    foreach ($conDetalle as $row) {
+        $clave = strtolower(trim($row['clave'] ?? ''));
+        if (isset($pagos[$clave])) {
+            $pagos[$clave]    += floatval($row['total']);
+            $cantidades[$clave] += intval($row['cantidad']);
+        }
+    }
+
+    // Pedidos SIN pedido_pagos (viejos, pago simple)
+    if (!empty($idsConPagos)) {
+        $placeholders = implode(',', array_fill(0, count($idsConPagos), '?'));
+        $whereViejo = $cajaId
+            ? "caja_id = ? AND cerrado = 1 AND id NOT IN ($placeholders)"
+            : "DATE(fecha) = ? AND cerrado = 1 AND id NOT IN ($placeholders)";
+        $paramsViejo = $cajaId
+            ? array_merge([$cajaId], $idsConPagos)
+            : array_merge([$fechaHoy], $idsConPagos);
+    } else {
+        $whereViejo  = $cajaId ? "caja_id = ? AND cerrado = 1" : "DATE(fecha) = ? AND cerrado = 1";
+        $paramsViejo = $cajaId ? [$cajaId] : [$fechaHoy];
+    }
+
+    $sqlViejo = "SELECT metodo_pago, SUM(total) as total, COUNT(*) as cantidad
+                 FROM pedidos
+                 WHERE $whereViejo
+                 GROUP BY metodo_pago";
+    $stmtV = $this->db->prepare($sqlViejo);
+    $stmtV->execute($paramsViejo);
+    foreach ($stmtV->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+        $metodo = strtolower(trim($row['metodo_pago'] ?? ''));
+        if (isset($pagos[$metodo])) {
+            $pagos[$metodo]     += floatval($row['total']);
+            $cantidades[$metodo] += intval($row['cantidad']);
+        }
+    }
 
     // Obtener inicio de caja
     $inicioCaja = $cajaId
@@ -105,41 +139,57 @@ class CajaModel
     $paramCaja = $cajaId ? ['cajaId' => $cajaId] : ['fechaHoy' => $fechaHoy];
     $whereCaja = $cajaId ? "caja_id = :cajaId" : "DATE(fecha) = :fechaHoy";
 
-    // Gastos
-    $sqlGastos = "SELECT COALESCE(SUM(monto),0) as total_gastos, COUNT(*) as cantidad_gastos FROM gastos WHERE $whereCaja";
+    // Gastos (detalle individual)
+    $sqlGastos = "SELECT id, monto, motivo, autorizado_por, fecha,
+                         COALESCE((SELECT nombre FROM categorias_gasto cg WHERE cg.id = gastos.categoria_id), '') as categoria
+                  FROM gastos WHERE $whereCaja ORDER BY fecha ASC";
     $stmt = $this->db->prepare($sqlGastos);
     $stmt->execute($paramCaja);
-    $gastosRow = $stmt->fetch(\PDO::FETCH_ASSOC);
-    $totalGastos = $gastosRow ? floatval($gastosRow['total_gastos']) : 0;
-    $cantidadGastos = $gastosRow ? intval($gastosRow['cantidad_gastos']) : 0;
+    $gastosDetalle   = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    $totalGastos     = array_sum(array_column($gastosDetalle, 'monto'));
+    $cantidadGastos  = count($gastosDetalle);
 
-    // Caja fuerte
-    $sqlCF = "SELECT COALESCE(SUM(monto),0) as total_cf, COUNT(*) as cantidad_cf FROM caja_fuerte WHERE $whereCaja";
+    // Ingresos de caja (detalle individual)
+    $sqlIngresos = "SELECT id, monto, motivo, responsable, fecha
+                    FROM ingresos_caja WHERE $whereCaja ORDER BY fecha ASC";
+    $stmt = $this->db->prepare($sqlIngresos);
+    $stmt->execute($paramCaja);
+    $ingresosDetalle   = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    $totalIngresos     = array_sum(array_column($ingresosDetalle, 'monto'));
+
+    // Caja fuerte (detalle individual)
+    $sqlCF = "SELECT id, monto, responsable, fecha FROM caja_fuerte WHERE $whereCaja ORDER BY fecha ASC";
     $stmt = $this->db->prepare($sqlCF);
     $stmt->execute($paramCaja);
-    $cfRow = $stmt->fetch(\PDO::FETCH_ASSOC);
-    $cajaFuerte = $cfRow ? floatval($cfRow['total_cf']) : 0;
-    $cantidadCajaFuerte = $cfRow ? intval($cfRow['cantidad_cf']) : 0;
+    $cajaFuerteDetalle  = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    $cajaFuerte         = array_sum(array_column($cajaFuerteDetalle, 'monto'));
+    $cantidadCajaFuerte = count($cajaFuerteDetalle);
 
     // Componer array de resultados
-    $datos['efectivo_total']    = $pagos['efectivo']['total'];
-    $datos['efectivo_cantidad'] = $pagos['efectivo']['cantidad'];
-    $datos['mercadopago']       = $pagos['mercadopago']['total'];
-    $datos['mercadopago_cantidad'] = $pagos['mercadopago']['cantidad'];
-    $datos['tarjetas']          = $pagos['tarjeta']['total'];
-    $datos['tarjetas_cantidad'] = $pagos['tarjeta']['cantidad'];
-    $datos['qr']                = $pagos['qr']['total'];
-    $datos['qr_cantidad']       = $pagos['qr']['cantidad'];
-    $datos['inicio_caja']       = $inicioCaja;
-    $datos['efectivo_ventas']   = $pagos['efectivo']['total'];
-    $datos['caja_fuerte']       = $cajaFuerte;
+    $datos['efectivo_total']       = $pagos['efectivo'];
+    $datos['efectivo_cantidad']    = $cantidades['efectivo'];
+    $datos['mercadopago']          = $pagos['mercadopago'];
+    $datos['mercadopago_cantidad'] = $cantidades['mercadopago'];
+    $datos['tarjetas']             = $pagos['tarjeta'];
+    $datos['tarjetas_cantidad']    = $cantidades['tarjeta'];
+    $datos['qr']                   = $pagos['qr'];
+    $datos['qr_cantidad']          = $cantidades['qr'];
+    $datos['inicio_caja']          = $inicioCaja;
+    $datos['efectivo_ventas']      = $pagos['efectivo'];
+    $datos['caja_fuerte']          = $cajaFuerte;
     $datos['cantidad_caja_fuerte'] = $cantidadCajaFuerte;
-    $datos['total_gastos']      = $totalGastos;
-    $datos['cantidad_gastos']   = $cantidadGastos;
+    $datos['caja_fuerte_detalle']  = $cajaFuerteDetalle;
+    $datos['total_gastos']         = $totalGastos;
+    $datos['cantidad_gastos']      = $cantidadGastos;
+    $datos['gastos_detalle']       = $gastosDetalle;
+    $datos['ingresos_detalle']     = $ingresosDetalle;
+    $datos['total_ingresos']       = $totalIngresos;
+    $datos['caja_id']              = $cajaId;
 
-    // SALDO: inicio de caja + ventas en efectivo - caja fuerte - gastos
+    // SALDO: inicio + ingresos + efectivo ventas - caja fuerte - gastos
     $datos['saldo'] = floatval($inicioCaja)
-                    + floatval($pagos['efectivo']['total'])
+                    + floatval($totalIngresos)
+                    + floatval($pagos['efectivo'])
                     - floatval($cajaFuerte)
                     - floatval($totalGastos);
 

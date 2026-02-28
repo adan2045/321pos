@@ -241,7 +241,6 @@ class CajeroController extends Controller {
     header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
     exit;
 }
-
     public function actionCuentaMesa()
     {
         if (!isset($_GET['id'])) { echo "Mesa no especificada"; return; }
@@ -368,17 +367,13 @@ class CajeroController extends Controller {
         $nav    = \app\controllers\SiteController::nav();
         $path   = static::path();
 
-        $cajaId = $_SESSION['caja_id'] ?? null;
+        $cajaModel = new \app\models\CajaModel();
+        $datos     = $cajaModel->obtenerTotalesDelDia();
+        $productos = $cajaModel->resumenPorProducto();
 
-        if ($cajaId) {
-            $cajaModel = new \app\models\CajaModel();
-            $datos     = $cajaModel->obtenerTotalesDelDia();
-            $productos = $cajaModel->resumenPorProducto();
-            $gastos    = $cajaModel->obtenerGastosDelDia();
-            $datos['total_gastos']    = $gastos['total'];
-            $datos['cantidad_gastos'] = $gastos['cantidad'];
-        } else {
-            $datos = [
+        // Si no hay caja activa, datos vacíos seguros
+        if (empty($datos['caja_id'])) {
+            $datos = array_merge([
                 'venta_bruta' => 0, 'cantidad_pedidos' => 0,
                 'efectivo_total' => 0, 'efectivo_cantidad' => 0,
                 'qr' => 0, 'qr_cantidad' => 0,
@@ -386,9 +381,13 @@ class CajeroController extends Controller {
                 'tarjetas' => 0, 'tarjetas_cantidad' => 0,
                 'inicio_caja' => 0, 'efectivo_ventas' => 0,
                 'caja_fuerte' => 0, 'cantidad_caja_fuerte' => 0,
+                'caja_fuerte_detalle' => [],
                 'total_gastos' => 0, 'cantidad_gastos' => 0,
-                'saldo' => 0
-            ];
+                'gastos_detalle' => [],
+                'ingresos_detalle' => [],
+                'total_ingresos' => 0,
+                'saldo' => 0, 'caja_id' => null
+            ], $datos);
             $productos = [];
         }
 
@@ -401,6 +400,21 @@ class CajeroController extends Controller {
             "productos" => $productos,
             "ruta"      => $path,
         ]);
+    }
+
+    public function actionCerrarTurno()
+    {
+        if (session_status() === PHP_SESSION_NONE) session_start();
+
+        // Registra salida del usuario logueado como empleado (si corresponde)
+        $usuarioId = $_SESSION['user_id'] ?? null;
+
+        // Limpia variables de turno pero mantiene la caja abierta
+        unset($_SESSION['turno_inicio']);
+        $_SESSION['mensaje_exito'] = "Turno cerrado correctamente.";
+
+        header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
+        exit;
     }
 
     public function actionCambiarMedioPago()
@@ -818,4 +832,225 @@ class CajeroController extends Controller {
         ]);
         return;
     }
+
+public function actionFicharEstado()
+{
+    if (session_status() === PHP_SESSION_NONE) session_start();
+    header('Content-Type: application/json; charset=utf-8');
+
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['status'=>'error','message'=>'Método no permitido']);
+        return;
+    }
+
+    $db = \DataBase::getInstance()->getConnection();
+    $payload = json_decode((string)file_get_contents('php://input'), true) ?: [];
+
+    $empleadoId = isset($payload['empleado_id']) ? (int)$payload['empleado_id'] : 0;
+    $empleadoNumero = isset($payload['empleado_numero']) ? trim((string)$payload['empleado_numero']) : '';
+
+    // Buscar empleado por número o por id
+    if ($empleadoId <= 0) {
+        if ($empleadoNumero === '') {
+            http_response_code(400);
+            echo json_encode(['status'=>'error','message'=>'Falta empleado_numero']);
+            return;
+        }
+
+        $st = $db->prepare("SELECT id, nombre FROM empleados WHERE numero_empleado = ? LIMIT 1");
+        $st->execute([$empleadoNumero]);
+        $emp = $st->fetch(\PDO::FETCH_ASSOC);
+
+        if (!$emp) {
+            http_response_code(404);
+            echo json_encode(['status'=>'error','message'=>'Empleado no encontrado']);
+            return;
+        }
+
+        $empleadoId = (int)$emp['id'];
+        $nombre = (string)$emp['nombre'];
+    } else {
+        $st = $db->prepare("SELECT id, nombre FROM empleados WHERE id = ? LIMIT 1");
+        $st->execute([$empleadoId]);
+        $emp = $st->fetch(\PDO::FETCH_ASSOC);
+
+        if (!$emp) {
+            http_response_code(404);
+            echo json_encode(['status'=>'error','message'=>'Empleado no encontrado']);
+            return;
+        }
+
+        $nombre = (string)$emp['nombre'];
+    }
+
+    $hoy = date('Y-m-d');
+
+    // Última entrada del día
+    $st = $db->prepare("
+        SELECT fecha_hora
+        FROM fichadas
+        WHERE empleado_id = ?
+          AND fecha = ?
+          AND tipo = 'entrada'
+        ORDER BY fecha_hora DESC
+        LIMIT 1
+    ");
+    $st->execute([$empleadoId, $hoy]);
+    $entrada = $st->fetchColumn();
+
+    // Última salida del día
+    $st2 = $db->prepare("
+        SELECT fecha_hora
+        FROM fichadas
+        WHERE empleado_id = ?
+          AND fecha = ?
+          AND tipo = 'salida'
+        ORDER BY fecha_hora DESC
+        LIMIT 1
+    ");
+    $st2->execute([$empleadoId, $hoy]);
+    $salida = $st2->fetchColumn();
+
+    $enTurno = false;
+    $segundos = 0;
+    $entradaHora = null;
+    $salidaHora = null;
+    $tiempoMin = null;
+    $tiempoHHMM = null;
+    $leyendaUltimoTurno = null;
+
+    if ($entrada) {
+        // Si no hay salida o la salida es anterior a la última entrada => está en turno
+        if (!$salida || strtotime($salida) < strtotime($entrada)) {
+            $enTurno = true;
+            $entradaHora = date('H:i', strtotime($entrada));
+            $segundos = max(0, time() - strtotime($entrada));
+        } else {
+            // Turno cerrado: última entrada y última salida
+            $entradaHora = date('H:i', strtotime($entrada));
+            $salidaHora  = date('H:i', strtotime($salida));
+            $tiempoMin   = (int) floor((strtotime($salida) - strtotime($entrada)) / 60);
+            if ($tiempoMin < 0) $tiempoMin = 0;
+            $tiempoHHMM  = sprintf('%02d:%02d', intdiv($tiempoMin, 60), $tiempoMin % 60);
+            $leyendaUltimoTurno = "Ingreso {$entradaHora} | Salida {$salidaHora} | Tiempo trabajado {$tiempoHHMM}";
+        }
+    }
+
+    echo json_encode([
+        'status' => 'ok',
+        'empleado_id' => $empleadoId,
+        'empleado_nombre' => $nombre,
+        'en_turno' => $enTurno,
+        // si en_turno => hora de entrada y segundos desde esa entrada
+        // si NO en_turno => último turno cerrado (entrada + salida + tiempo)
+        'entrada_hora' => $entradaHora,
+        'salida_hora' => $salidaHora,
+        'segundos_trabajados' => $segundos,
+        'tiempo_trabajado_min' => $tiempoMin,
+        'tiempo_trabajado_hhmm' => $tiempoHHMM,
+        'leyenda_ultimo_turno' => $leyendaUltimoTurno,
+    ]);
+}
+
+public function actionFicharRegistrar()
+{
+    if (session_status() === PHP_SESSION_NONE) session_start();
+    header('Content-Type: application/json; charset=utf-8');
+
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['status'=>'error','message'=>'Método no permitido']);
+        return;
+    }
+
+    $payload = json_decode((string)file_get_contents('php://input'), true) ?: [];
+    $empleadoId = (int)($payload['empleado_id'] ?? 0);
+    $tipo = strtolower(trim((string)($payload['tipo'] ?? '')));
+
+    if ($empleadoId <= 0 || !in_array($tipo, ['entrada','salida'], true)) {
+        http_response_code(400);
+        echo json_encode(['status'=>'error','message'=>'Datos inválidos']);
+        return;
+    }
+
+    $db = \DataBase::getInstance()->getConnection();
+
+    // registrado_por: usuario logueado si existe, si no NULL
+    $registradoPor = null;
+    if (!empty($_SESSION['user_id']) && is_numeric($_SESSION['user_id'])) {
+        $registradoPor = (int)$_SESSION['user_id'];
+        $chk = $db->prepare("SELECT id FROM usuarios WHERE id = ? LIMIT 1");
+        $chk->execute([$registradoPor]);
+        if (!$chk->fetchColumn()) $registradoPor = null;
+    }
+
+    $negocioId = isset($_SESSION['negocio_id']) ? (int)$_SESSION['negocio_id'] : null;
+
+    $hoy = date('Y-m-d');
+    $ahora = date('Y-m-d H:i:s');
+
+    try {
+        $db->beginTransaction();
+
+        // Si es salida: calcular tiempo trabajado desde última entrada no cerrada
+        $tiempoMin = null;
+        if ($tipo === 'salida') {
+            $st = $db->prepare("
+                SELECT fecha_hora
+                FROM fichadas
+                WHERE empleado_id = ?
+                  AND fecha = ?
+                  AND tipo = 'entrada'
+                ORDER BY fecha_hora DESC
+                LIMIT 1
+            ");
+            $st->execute([$empleadoId, $hoy]);
+            $entrada = $st->fetchColumn();
+
+            $st2 = $db->prepare("
+                SELECT fecha_hora
+                FROM fichadas
+                WHERE empleado_id = ?
+                  AND fecha = ?
+                  AND tipo = 'salida'
+                ORDER BY fecha_hora DESC
+                LIMIT 1
+            ");
+            $st2->execute([$empleadoId, $hoy]);
+            $salida = $st2->fetchColumn();
+
+            if ($entrada && (!$salida || strtotime($salida) < strtotime($entrada))) {
+                $tiempoMin = (int) floor((strtotime($ahora) - strtotime($entrada)) / 60);
+            }
+        }
+
+        $stmt = $db->prepare("
+            INSERT INTO fichadas
+              (negocio_id, empleado_id, tipo, fecha_hora, fecha, tardanza_min, es_tardanza, tiempo_trabajado_min, turno, registrado_por, notas)
+            VALUES
+              (?, ?, ?, ?, ?, NULL, 0, ?, 1, ?, NULL)
+        ");
+        $stmt->execute([
+            $negocioId,
+            $empleadoId,
+            $tipo,
+            $ahora,
+            $hoy,
+            $tiempoMin,
+            $registradoPor
+        ]);
+
+        $db->commit();
+        echo json_encode(['status'=>'ok']);
+        return;
+
+    } catch (\Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        http_response_code(500);
+        echo json_encode(['status'=>'error','message'=>$e->getMessage()]);
+        return;
+    }
+}
+
 }

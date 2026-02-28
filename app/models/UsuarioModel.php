@@ -9,7 +9,7 @@ class UsuarioModel
 
     public function __construct()
     {
-        $this->db = new DataBase();
+        $this->db = DataBase::getInstance()->getConnection();
     }
 
     public function guardar($nombre, $apellido, $email, $password, $dni, $rol)
@@ -19,33 +19,31 @@ class UsuarioModel
         $sql = "INSERT INTO usuarios (nombre, apellido, email, password, dni, rol)
                 VALUES (?, ?, ?, ?, ?, ?)";
 
-        return $this->db->query($sql, [
-            $nombre,
-            $apellido,
-            $email,
-            $passwordHash,
-            $dni,
-            $rol
-        ]);
+        $stmt = $this->db->prepare($sql);
+        return $stmt->execute([$nombre, $apellido, $email, $passwordHash, $dni, $rol]);
     }
 
     public function obtenerTodos()
     {
         $sql = "SELECT * FROM usuarios ORDER BY id DESC";
-        return $this->db->query($sql, [], true); // Devuelve como array asociativo
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute();
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
     public function obtenerPorId($id)
     {
         $sql = "SELECT * FROM usuarios WHERE id = ?";
-        $resultados = DataBase::query($sql, [$id]);
-        return $resultados[0] ?? null;
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([$id]);
+        return $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
     }
 
     public function eliminar($id)
     {
         $sql = "DELETE FROM usuarios WHERE id = ?";
-        return DataBase::execute($sql, [$id]);
+        $stmt = $this->db->prepare($sql);
+        return $stmt->execute([$id]);
     }
 
     public function actualizar($id, $nombre, $apellido, $email, $password, $dni, $rol)
@@ -59,14 +57,15 @@ class UsuarioModel
             $params = [$nombre, $apellido, $email, $dni, $rol, $id];
         }
 
-        return DataBase::execute($sql, $params);
+        $stmt = $this->db->prepare($sql);
+        return $stmt->execute($params);
     }
 
-    // ✅ Nuevo método para login
     public function buscarPorEmail($email)
     {
         $sql = "SELECT * FROM usuarios WHERE email = ?";
-        $resultado = DataBase::query($sql, [$email], true);
-        return $resultado[0] ?? null;
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([$email]);
+        return $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
     }
 }

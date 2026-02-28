@@ -1,252 +1,80 @@
 <?php
-$modeloCaja = new \app\models\CajaModel();
-$cajaId = $modeloCaja->obtenerCajaIdDelDia();
-$ultimoCierre = method_exists($modeloCaja, 'obtenerUltimoCierre') ? $modeloCaja->obtenerUltimoCierre() : 0;
+if (session_status() === PHP_SESSION_NONE) session_start();
+$modeloCaja   = new \app\models\CajaModel();
+$cajaId       = $datos['caja_id'] ?? $modeloCaja->obtenerCajaIdDelDia();
+$ultimoCierre = $modeloCaja->obtenerUltimoCierre();
+
+$gastosDet     = $datos['gastos_detalle']      ?? [];
+$cajaFuerteDet = $datos['caja_fuerte_detalle'] ?? [];
 ?>
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
     <?= $head ?>
     <title>Planilla de Ventas</title>
     <link rel="stylesheet" href="/public/css/crud.css">
     <link rel="stylesheet" href="/public/css/listado.css">
     <style>
-        html, body {
-            max-width: 100vw;
-            overflow-x: hidden;
-        }
-        body {
-            margin: 0;
-            padding: 0;
-        }
-        .planilla-container {
-            width: 100vw;
-            min-height: 100vh;
-            margin: 0;
-            padding: 0;
-            background-color: #fff;
-            border-radius: 10px 0 0 10px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.07);
-            font-family: Arial, sans-serif;
-            overflow-x: hidden;
-        }
-        .planilla-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 1rem;
-            overflow-x: auto;
-        }
-        .planilla-table th, .planilla-table td {
-            border: 1px solid #ccc;
-            padding: 8px;
-            font-size: 0.98rem;
-        }
-        .vistaCajero-toggle {
-            display: flex;
-            justify-content: center;
-            margin: 20px 0;
-        }
-        .vistaCajero-toggle a {
-            flex: 1;
-            padding: 10px;
-            text-align: center;
-            text-decoration: none;
-            font-size: 1rem;
-            border: none;
-            background-color: #eee;
-            color: #000;
-            transition: background 0.15s;
-        }
-        .vistaCajero-toggle .active {
-            background-color: black;
-            color: white;
-        }
-        .planilla-header {
-            display: block;
-            width: 100%;
-        }
+        html, body { max-width:100vw; overflow-x:hidden; margin:0; padding:0; }
+        .planilla-container { width:100vw; min-height:100vh; background:#fff; font-family:Arial,sans-serif; }
+        .planilla-table { width:100%; border-collapse:collapse; margin-top:1rem; }
+        .planilla-table th, .planilla-table td { border:1px solid #ccc; padding:8px; font-size:0.98rem; }
         .fecha-selector {
-            display: flex;
-            align-items: center;
-            gap: 18px;
-            font-size: 1.7rem;
-            font-weight: 700;
-            margin-top: 18px;
-            margin-bottom: 12px;
-            justify-content: flex-start;
-            width: 100%;
+            display:flex; align-items:center; gap:18px; font-size:1.7rem; font-weight:700;
+            margin-top:18px; margin-bottom:12px; padding-left:35px;
         }
-        .fecha-selector label {
-            font-size: 1.8rem;
-            font-weight: 700;
-            color: #222;
-            margin-bottom: 2px;
-            margin-right: 8px;
-            letter-spacing: 0.01em;
-            text-align: left;
-            padding-left: 35px;
-        }
-        .fecha-selector input[type="date"] {
-            padding: 10px 16px;
-            border: 1.5px solid #888;
-            border-radius: 7px;
-            font-size: 1.1rem;
-            background: #f7f7f7;
-            transition: border .18s;
-        }
-        .fecha-selector input[type="date"]:focus {
-            outline: none;
-            border: 2px solid #222;
-        }
-        .fecha-selector button {
-            background: #111;
-            color: #fff;
-            padding: 10px 19px;
-            border: none;
-            border-radius: 7px;
-            font-size: 1.05rem;
-            font-weight: bold;
-            cursor: pointer;
-            box-shadow: 0 1px 5px rgba(0, 0, 0, .08);
-            transition: background 0.15s, transform 0.09s;
-        }
-        .fecha-selector button:hover {
-            background: #353535;
-            transform: scale(1.05);
-        }
+        .fecha-selector label { font-size:1.8rem; font-weight:700; color:#222; }
+        .fecha-selector input[type="date"] { padding:10px 16px; border:1.5px solid #888; border-radius:7px; font-size:1.1rem; background:#f7f7f7; }
+        .fecha-selector input[type="date"]:focus { outline:none; border:2px solid #222; }
+        .fecha-selector button { background:#111; color:#fff; padding:10px 19px; border:none; border-radius:7px; font-size:1.05rem; font-weight:bold; cursor:pointer; }
+        .fecha-selector button:hover { background:#353535; }
+        .contenido-principal { display:flex; align-items:flex-start; width:100%; margin:0; }
+        .planilla-contenido { flex:1 1 0; min-width:0; padding:2rem; }
         .planilla-botones-derecha {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-            align-items: flex-end;
-            min-width: 170px;
-            max-width: 200px;
-            margin-left: 6px;
-            margin-top: 2rem;
+            display:flex; flex-direction:column; gap:16px; align-items:flex-end;
+            min-width:170px; max-width:200px; margin-top:2rem; padding-right:1.5rem;
         }
-        .planilla-botones-derecha button,
-        .planilla-botones-derecha a button {
-            background: black;
-            color: white;
-            padding: 0.9rem 0;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            width: 170px;
-            font-size: 1rem;
-            text-align: center;
-            margin: 0;
-            display: block;
-            transition: background 0.15s;
+        .planilla-botones-derecha button {
+            background:black; color:white; padding:0.9rem 0; border:none; border-radius:6px;
+            cursor:pointer; width:170px; font-size:1rem; text-align:center; transition:background 0.15s;
         }
-        .planilla-botones-derecha button:hover,
-        .planilla-botones-derecha a button:hover {
-            background: #222;
-        }
-        .contenido-principal {
-            display: flex;
-            align-items: flex-start;
-            gap: 0;
-            width: 100%;
-            margin: 0;
-        }
-        .planilla-contenido {
-            flex: 1 1 0;
-            min-width: 0;
-            padding: 2rem 2rem 2rem 2rem;
-        }
-        .planilla-resumen {
-            margin-top: 1.2rem;
-        }
-        .planilla-resumen h4 {
-            font-size: 1.8rem !important;
-            font-weight: 700 !important;
-            color: #111 !important;
-            font-family: Arial, sans-serif !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            padding-left: 0 !important;
-            border: none !important;
-            letter-spacing: 0.01em !important;
-            text-align: left !important;
-            line-height: 1.2 !important;
-            display: flex !important;
-            align-items: center !important;
-        }
-        .estado-btn {
-            padding: 4px 10px;
-            margin: 2px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            background-color: #eee;
-            color: #333;
-            font-size: 0.9rem;
-            cursor: pointer;
-        }
-        @media (max-width: 900px) {
-            .contenido-principal {
-                flex-direction: column;
-            }
-            .planilla-botones-derecha {
-                align-items: stretch;
-                max-width: none;
-                margin-left: 0;
-                margin-top: 1rem;
-            }
-        }
-        /* MODAL GENERAL */
-        .modal-fondo {
-            position: fixed;
-            z-index: 9999;
-            left: 0;
-            top: 0;
-            width: 100vw;
-            height: 100vh;
-            background: rgba(0, 0, 0, 0.28);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .modal-contenido {
-            background: #fff;
-            border-radius: 16px;
-            box-shadow: 0 4px 32px rgba(0, 0, 0, .13);
-            max-width: 430px;
-            width: 100%;
-            padding: 1.2rem 2rem 2rem 2rem;
-            animation: modalFadeIn .24s;
-        }
-        @keyframes modalFadeIn {
-            from { transform: translateY(60px); opacity: 0; }
-            to { transform: none; opacity: 1; }
-        }
-        .modal-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: .7rem;
-            border-bottom: 1px solid #eee;
-            padding-bottom: .3rem;
-        }
-        @media (max-width: 600px) {
-            .modal-contenido {
-                padding: 0.7rem 0.7rem 1.4rem 0.7rem;
-            }
+        .planilla-botones-derecha button:hover { background:#333; }
+        .btn-rojo    { background:#c0392b !important; } .btn-rojo:hover    { background:#a93226 !important; }
+        .btn-naranja { background:#d35400 !important; } .btn-naranja:hover { background:#b44200 !important; }
+        .planilla-resumen { margin-top:1.2rem; }
+        .planilla-resumen h4 { font-size:1.8rem !important; font-weight:700 !important; color:#111 !important; margin:0 !important; padding:0 !important; border:none !important; }
+        /* Filas */
+        .fila-gris td { font-weight:bold; background:#ddd; }
+        /* Fila con toggle para desplegar detalle */
+        .fila-toggle td:first-child { cursor:pointer; user-select:none; }
+        .fila-toggle td:first-child:hover { text-decoration:underline; }
+        .fila-toggle .toggle-icon { font-size:0.85rem; margin-left:6px; color:#666; }
+        /* Sub-filas de detalle (ocultas por defecto) */
+        .fila-sub { display:none; }
+        .fila-sub td { background:#f5f5f5; color:#555; font-size:0.93rem; padding-left:24px !important; }
+        .fila-sub td:first-child::before { content:"↳ "; color:#aaa; }
+        /* Alertas */
+        .alerta-ok  { background:#d4edda; color:#155724; padding:12px; border-radius:8px; margin:12px 2rem; font-size:1.1rem; text-align:center; border:1px solid #c3e6cb; }
+        .alerta-err { background:#f8d7da; color:#721c24; padding:12px; border-radius:8px; margin:12px 2rem; font-size:1rem; border:1px solid #f5c6cb; }
+        @media(max-width:900px) {
+            .contenido-principal { flex-direction:column; }
+            .planilla-botones-derecha { align-items:stretch; max-width:none; padding-right:2rem; }
+            .planilla-botones-derecha button { width:100%; }
         }
     </style>
 </head>
 <body>
     <header><?= $nav ?></header>
 
-    
     <?php if (isset($_GET['cerrada']) && $_GET['cerrada'] == 'ok'): ?>
-        <div style="background:#d4edda; color:#155724; padding:12px; border-radius:8px; margin:16px 0; font-size:1.2rem; text-align:center; border:1px solid #c3e6cb;">
-            &#9989; Caja cerrada con éxito.
-        </div>
+        <div class="alerta-ok">&#9989; Caja cerrada con éxito.</div>
+    <?php endif; ?>
+    <?php if (!empty($_SESSION['mensaje_exito'])): ?>
+        <div class="alerta-ok">&#9989; <?= htmlspecialchars($_SESSION['mensaje_exito']) ?></div>
+        <?php unset($_SESSION['mensaje_exito']); ?>
     <?php endif; ?>
     <?php if (!empty($_SESSION['mensaje_error'])): ?>
-        <div class="alert-error"><?= $_SESSION['mensaje_error'] ?></div>
+        <div class="alerta-err">&#9888; <?= htmlspecialchars($_SESSION['mensaje_error']) ?></div>
         <?php unset($_SESSION['mensaje_error']); ?>
     <?php endif; ?>
 
@@ -263,245 +91,174 @@ $ultimoCierre = method_exists($modeloCaja, 'obtenerUltimoCierre') ? $modeloCaja-
             <div class="planilla-contenido">
                 <table class="planilla-table">
                     <thead>
-                        <tr>
-                            <th>Detalle</th>
-                            <th>Total</th>
-                            <th>Cantidad</th>
-                        </tr>
+                        <tr><th>Detalle</th><th>Total $</th><th>Cantidad</th></tr>
                     </thead>
                     <tbody>
                         <tr>
                             <td>FACTURAS B</td>
-                            <td><?= number_format($datos['venta_bruta'], 2) ?></td>
-                            <td><?= $datos['cantidad_pedidos'] ?></td>
+                            <td><?= number_format($datos['venta_bruta'] ?? 0, 2, ',', '.') ?></td>
+                            <td><?= $datos['cantidad_pedidos'] ?? 0 ?></td>
                         </tr>
-                        <tr>
-                            <td colspan="3" style="font-weight: bold; background: #ddd">TOTAL VENTA BRUTA</td>
-                        </tr>
+                        <tr class="fila-gris"><td colspan="3">TOTAL VENTA BRUTA</td></tr>
+
                         <tr>
                             <td>EFECTIVO TOTAL</td>
-                            <td><?= number_format($datos['efectivo_total'], 2) ?></td>
-                            <td><?= $datos['efectivo_cantidad'] ?></td>
+                            <td><?= number_format($datos['efectivo_total'] ?? 0, 2, ',', '.') ?></td>
+                            <td><?= $datos['efectivo_cantidad'] ?? 0 ?></td>
                         </tr>
                         <tr>
-                            <td>Qr</td>
-                            <td><?= number_format($datos['qr'], 2) ?></td>
-                            <td><?= $datos['qr_cantidad'] ?></td>
+                            <td>QR</td>
+                            <td><?= number_format($datos['qr'] ?? 0, 2, ',', '.') ?></td>
+                            <td><?= $datos['qr_cantidad'] ?? 0 ?></td>
                         </tr>
                         <tr>
                             <td>MercadoPago</td>
-                            <td><?= number_format($datos['mercadopago'], 2) ?></td>
-                            <td><?= $datos['mercadopago_cantidad'] ?></td>
+                            <td><?= number_format($datos['mercadopago'] ?? 0, 2, ',', '.') ?></td>
+                            <td><?= $datos['mercadopago_cantidad'] ?? 0 ?></td>
                         </tr>
                         <tr>
                             <td>Tarjetas</td>
-                            <td><?= number_format($datos['tarjetas'], 2) ?></td>
-                            <td><?= $datos['tarjetas_cantidad'] ?></td>
+                            <td><?= number_format($datos['tarjetas'] ?? 0, 2, ',', '.') ?></td>
+                            <td><?= $datos['tarjetas_cantidad'] ?? 0 ?></td>
                         </tr>
-                        <tr>
-                            <td colspan="3" style="font-weight: bold; background: #ddd">TOTAL INGRESO BRUTO</td>
-                        </tr>
+
+                        <tr class="fila-gris"><td colspan="3">TOTAL INGRESO BRUTO</td></tr>
+
                         <tr>
                             <td>Inicio de Caja</td>
-                            <td><?= number_format($datos['inicio_caja'], 2) ?></td>
+                            <td><?= number_format($datos['inicio_caja'] ?? 0, 2, ',', '.') ?></td>
                             <td></td>
                         </tr>
                         <tr>
                             <td>Efectivo por Ventas</td>
-                            <td><?= number_format($datos['efectivo_ventas'], 2) ?></td>
+                            <td><?= number_format($datos['efectivo_ventas'] ?? 0, 2, ',', '.') ?></td>
                             <td></td>
                         </tr>
+
+                        <!-- CAJA FUERTE: clic para desplegar -->
+                        <?php if (!empty($cajaFuerteDet)): ?>
+                        <tr class="fila-toggle" onclick="toggleDetalle('cf')">
+                            <td style="color:red">Caja Fuerte <span class="toggle-icon" id="icon-cf">▶ ver detalle</span></td>
+                            <td><?= number_format($datos['caja_fuerte'] ?? 0, 2, ',', '.') ?></td>
+                            <td><?= count($cajaFuerteDet) ?></td>
+                        </tr>
+                        <?php foreach ($cajaFuerteDet as $i => $cf): ?>
+                        <tr class="fila-sub fila-cf">
+                            <td><?= date('d/m H:i', strtotime($cf['fecha'])) ?> — <?= htmlspecialchars($cf['responsable']) ?></td>
+                            <td><?= number_format($cf['monto'], 2, ',', '.') ?></td>
+                            <td></td>
+                        </tr>
+                        <?php endforeach; ?>
+                        <?php else: ?>
                         <tr>
                             <td style="color:red">Caja Fuerte</td>
-                            <td><?= number_format($datos['caja_fuerte'], 2) ?></td>
-                            <td><?= $datos['cantidad_caja_fuerte'] ?? 0 ?></td>
+                            <td>0,00</td>
+                            <td>0</td>
                         </tr>
+                        <?php endif; ?>
+
+                        <!-- GASTOS: clic para desplegar -->
+                        <?php if (!empty($gastosDet)): ?>
+                        <tr class="fila-toggle" onclick="toggleDetalle('gastos')">
+                            <td style="color:#ff6600">Gastos <span class="toggle-icon" id="icon-gastos">▶ ver detalle</span></td>
+                            <td><?= number_format($datos['total_gastos'] ?? 0, 2, ',', '.') ?></td>
+                            <td><?= count($gastosDet) ?></td>
+                        </tr>
+                        <?php foreach ($gastosDet as $g): ?>
+                        <tr class="fila-sub fila-gastos">
+                            <td>
+                                <?= date('d/m H:i', strtotime($g['fecha'])) ?> —
+                                <?= htmlspecialchars($g['motivo']) ?>
+                                <?php if (!empty($g['categoria'])): ?>(<?= htmlspecialchars($g['categoria']) ?>)<?php endif; ?>
+                                — aut: <?= htmlspecialchars($g['autorizado_por']) ?>
+                            </td>
+                            <td><?= number_format($g['monto'], 2, ',', '.') ?></td>
+                            <td></td>
+                        </tr>
+                        <?php endforeach; ?>
+                        <?php else: ?>
                         <tr>
                             <td style="color:#ff6600">Gastos</td>
-                            <td><?= number_format($datos['total_gastos'], 2) ?></td>
-                            <td><?= $datos['cantidad_gastos'] ?? 0 ?></td>
+                            <td>0,00</td>
+                            <td>0</td>
                         </tr>
+                        <?php endif; ?>
+
                         <tr>
-                            <td style="font-weight: bold;">SALDO DE CAJA</td>
-                            <td style="font-weight: bold;"><?= number_format($datos['saldo'], 2) ?></td>
+                            <td style="font-weight:bold">SALDO DE CAJA</td>
+                            <td style="font-weight:bold"><?= number_format($datos['saldo'] ?? 0, 2, ',', '.') ?></td>
                             <td></td>
                         </tr>
                     </tbody>
                 </table>
+
+                <!-- RESUMEN POR PRODUCTO -->
                 <div class="planilla-resumen">
-                    <h4> Resumen por Producto</h4>
+                    <h4>Resumen por Producto</h4>
                     <table class="planilla-table">
                         <thead>
-                            <tr>
-                                <th>Producto</th>
-                                <th>Total $</th>
-                                <th>Cantidad</th>
-                                <th>% Venta</th>
-                            </tr>
+                            <tr><th>Producto</th><th>Total $</th><th>Cantidad</th><th>% Venta</th></tr>
                         </thead>
                         <tbody>
                             <?php
-                            $total_venta = $datos['venta_bruta'];
+                            $total_venta = $datos['venta_bruta'] ?? 0;
                             foreach ($productos as $prod):
-                                $porcentaje = ($total_venta > 0) ? ($prod['total'] / $total_venta) * 100 : 0;
-                                ?>
-                                <tr>
-                                    <td><?= htmlspecialchars($prod['nombre']) ?></td>
-                                    <td><?= number_format($prod['total'], 2) ?></td>
-                                    <td><?= $prod['cantidad'] ?></td>
-                                    <td class="porcentaje"><?= number_format($porcentaje, 1) ?>%</td>
-                                </tr>
+                                $pct = ($total_venta > 0) ? ($prod['total'] / $total_venta) * 100 : 0;
+                            ?>
+                            <tr>
+                                <td><?= htmlspecialchars($prod['nombre']) ?></td>
+                                <td><?= number_format($prod['total'], 2, ',', '.') ?></td>
+                                <td><?= $prod['cantidad'] ?></td>
+                                <td><?= number_format($pct, 1) ?>%</td>
+                            </tr>
                             <?php endforeach; ?>
                         </tbody>
                     </table>
                 </div>
             </div>
-           <!-- <div class="planilla-botones-derecha">
-                <button type="button" onclick="abrirCajaModal()">Abrir Caja</button>
-                <button type="button" onclick="abrirGastoModal()">Gastos</button>
-                <button type="button" onclick="abrirCajaFuerteModal()">Caja Fuerte</button>
-                <button onclick="cerrarCaja()">Cerrar Caja</button>
-                <button onclick="window.print()">Imprimir</button>
-                <a href="<?= $ruta ?>/cajero/libroDiario"><button>Movimientos</button></a>
-                <a href="<?= $ruta ?>/admin/gestion"><button>Menu Principal</button></a>
+
+            <!-- BOTONES DERECHA -->
+            <div class="planilla-botones-derecha">
+                <button type="button" onclick="cerrarTurno()" class="btn-naranja">Cerrar Turno</button>
+                <button type="button" onclick="cerrarCaja()"  class="btn-rojo">Cerrar Caja</button>
+                <button type="button" onclick="exportarPlanilla()">Exportar</button>
+                <button type="button" onclick="window.print()">Imprimir</button>
             </div>
-        </div>-->
+        </div>
     </main>
 
-    <!-- MODAL GASTOS -->
-    <div id="gastoModal" class="modal-fondo" style="display: none;">
-        <div class="modal-contenido">
-            <div class="modal-header">
-                <h2>Registrar Gasto</h2>
-                <span onclick="cerrarGastoModal()" style="cursor:pointer;font-size:1.5rem;">&times;</span>
-            </div>
-            <form action="<?= $ruta ?>/cajero/registrarGasto" method="POST" class="registro-form" style="padding: 1rem 0 0 0; margin:0;">
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label class="form-label">Motivo</label>
-                        <input type="text" name="motivo" class="form-control" required placeholder="Ej: Pan, luz...">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Monto</label>
-                        <input type="number" step="0.01" name="monto" class="form-control" required placeholder="Monto $">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Autorizó</label>
-                        <input type="text" name="autorizado_por" class="form-control" required placeholder="Nombre o usuario">
-                    </div>
-                </div>
-                <input type="hidden" name="caja_id" value="<?= htmlspecialchars($cajaId) ?>">
-                <button type="submit" class="btn" style="margin-top:12px;">Registrar Gasto</button>
-                <button type="button" class="btn" style="background:#aaa;margin-top:12px;" onclick="cerrarGastoModal()">Cancelar</button>
-            </form>
-        </div>
-    </div>
-    <!-- MODAL ABRIR CAJA -->
-    <div id="abrirCajaModal" class="modal-fondo" style="display: none;">
-        <div class="modal-contenido">
-            <div class="modal-header">
-                <h2>Abrir Caja</h2>
-                <span onclick="cerrarCajaModal()" style="cursor:pointer;font-size:1.5rem;">&times;</span>
-            </div>
-            <form action="<?= $ruta ?>/cajero/abrirCaja" method="GET" class="registro-form" style="padding: 1rem 0 0 0; margin:0;">
-                <div class="form-group full-width">
-                    <label class="form-label">Monto Inicial</label>
-                    <input 
-                        type="number"
-                        name="monto"
-                        id="montoAbrirCaja"
-                        class="form-control"
-                        required
-                        value="<?= htmlspecialchars($ultimoCierre) ?>"
-                    >
-                </div>
-                <button type="submit" class="btn" style="margin-top:12px;">Abrir Caja</button>
-                <button type="button" class="btn" style="background:#aaa;margin-top:12px;" onclick="cerrarCajaModal()">Cancelar</button>
-            </form>
-        </div>
-    </div>
-    <!-- MODAL CAJA FUERTE -->
-    <div id="cajaFuerteModal" class="modal-fondo" style="display: none;">
-        <div class="modal-contenido">
-            <div class="modal-header">
-                <h2>Caja Fuerte</h2>
-                <span onclick="cerrarCajaFuerteModal()" style="cursor:pointer;font-size:1.5rem;">&times;</span>
-            </div>
-            <form action="<?= $ruta ?>/cajero/registrarCajaFuerte" method="POST" class="registro-form" style="padding: 1rem 0 0 0; margin:0;">
-                <div class="form-group full-width">
-                    <label class="form-label">Monto a pasar</label>
-                    <input type="number" name="monto" class="form-control" required>
-                </div>
-                <div class="form-group full-width">
-                    <label class="form-label">Motivo</label>
-                    <input type="text" name="motivo" class="form-control" placeholder="Ej: retiro excedente / seguridad" required>
-                </div>
-                <div class="form-group full-width">
-                    <label class="form-label">Responsable</label>
-                    <input type="text" name="responsable" class="form-control" required>
-                </div>
-                <input type="hidden" name="caja_id" value="<?= htmlspecialchars($cajaId) ?>">
-                <button type="submit" class="btn" style="margin-top:12px;">Registrar</button>
-                <button type="button" class="btn" style="background:#aaa;margin-top:12px;" onclick="cerrarCajaFuerteModal()">Cancelar</button>
-            </form>
-        </div>
-    </div>
     <script>
+        function toggleDetalle(grupo) {
+            const filas = document.querySelectorAll('.fila-' + grupo);
+            const icon  = document.getElementById('icon-' + grupo);
+            const oculto = filas[0].style.display === 'none' || filas[0].style.display === '';
+            filas.forEach(f => f.style.display = oculto ? 'table-row' : 'none');
+            icon.textContent = oculto ? '▼ ocultar' : '▶ ver detalle';
+        }
         function cambiarFecha() {
-            const fecha = document.getElementById('fecha').value;
-            if (fecha) {
-                window.location.href = '<?= $ruta ?>/cajero/planillaCaja?fecha=' + fecha;
-            }
+            const f = document.getElementById('fecha').value;
+            if (f) window.location.href = '<?= $ruta ?>/cajero/planillaCaja?fecha=' + f;
+        }
+        function cerrarTurno() {
+            if (confirm('¿Cerrar el turno actual? La caja seguirá abierta.'))
+                window.location.href = '<?= $ruta ?>/cajero/cerrarTurno';
         }
         function cerrarCaja() {
-            if (confirm('¿Desea cerrar la caja?')) {
+            if (confirm('¿Cerrar la caja? No podrá operar hasta abrir una nueva.'))
                 window.location.href = '<?= $ruta ?>/cajero/cerrarCaja';
+        }
+        function exportarPlanilla() {
+            const f = document.getElementById('fecha').value || '<?= date('Y-m-d') ?>';
+            window.location.href = '<?= $ruta ?>/cajero/exportarPlanilla?fecha=' + f;
+        }
+        window.addEventListener('message', e => {
+            if (!e.data || e.data.type !== 'OPEN_MODAL') return;
+            switch(e.data.modal) {
+                case 'ABRIR_CAJA':  abrirCajaModal();      break;
+                case 'EGRESO':      abrirGastoModal();      break;
+                case 'CAJA_FUERTE': abrirCajaFuerteModal(); break;
             }
-        }
-        // POPUP Gastos
-        function abrirGastoModal() {
-            document.getElementById('gastoModal').style.display = 'flex';
-            setTimeout(() => { document.querySelector('#gastoModal input[name="motivo"]').focus(); }, 150);
-        }
-        function cerrarGastoModal() { document.getElementById('gastoModal').style.display = 'none'; }
-        // POPUP Abrir Caja
-        function abrirCajaModal() {
-            document.getElementById('abrirCajaModal').style.display = 'flex';
-            // Ponemos el valor en el input del modal SOLO cuando se abre
-            <?php if ($ultimoCierre): ?>
-                document.getElementById('montoAbrirCaja').value = <?= json_encode($ultimoCierre) ?>;
-            <?php else: ?>
-                document.getElementById('montoAbrirCaja').value = "0";
-            <?php endif; ?>
-            setTimeout(() => { document.getElementById('montoAbrirCaja').focus(); }, 150);
-        }
-        function cerrarCajaModal() { document.getElementById('abrirCajaModal').style.display = 'none'; }
-        // POPUP Caja Fuerte
-        function abrirCajaFuerteModal() {
-            document.getElementById('cajaFuerteModal').style.display = 'flex';
-            setTimeout(() => { document.querySelector('#cajaFuerteModal input[name="monto"]').focus(); }, 150);
-        }
-        function cerrarCajaFuerteModal() { document.getElementById('cajaFuerteModal').style.display = 'none'; }
-        // ESC para cerrar cualquier modal
-        window.addEventListener('keydown', function (e) {
-            if (e.key === "Escape") {
-                cerrarGastoModal();
-                cerrarCajaModal();
-                cerrarCajaFuerteModal();
-            }
-        })
-
-    
-        window.addEventListener('message', (e) => {
-             if (!e.data || e.data.type !== 'OPEN_MODAL') return;
-
-            switch (e.data.modal) {
-              case 'ABRIR_CAJA':   abrirCajaModal(); break;
-              case 'EGRESO':       abrirGastoModal(); break;
-              case 'CAJA_FUERTE':  abrirCajaFuerteModal(); break;
-  }
-});
-</script>
-
+        });
+    </script>
 </body>
 </html>
