@@ -511,30 +511,74 @@ exit;
     }
 
     public function actionCerrarCaja()
-    {
-        if (session_status() === PHP_SESSION_NONE) session_start();
+{
+    if (session_status() === PHP_SESSION_NONE) session_start();
 
-        try {
-            $cajaModel  = new \app\models\CajaModel();
-            $usuarioId  = $_SESSION['user_id'] ?? null;
-            $datos      = $cajaModel->obtenerTotalesDelDia();
-            $saldoCierre= $datos['saldo'];
+    header('Content-Type: application/json; charset=utf-8');
 
-            $exito = $cajaModel->cerrarCajaDelDia($usuarioId, null, $saldoCierre);
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        echo json_encode(['status'=>'error','message'=>'Método no permitido']);
+        return;
+    }
 
-            if ($exito) {
-                $_SESSION['mensaje_exito'] = "¡Caja cerrada con éxito!";
-                unset($_SESSION['caja_abierta'], $_SESSION['caja_id'], $_SESSION['caja_apertura'], $_SESSION['saldo_inicial']);
-            } else {
-                $_SESSION['mensaje_error'] = "No se encontró una caja abierta para cerrar.";
-            }
-        } catch (\Exception $e) {
-            $_SESSION['mensaje_error'] = "Error al cerrar la caja: " . $e->getMessage();
+    $payload = json_decode(file_get_contents('php://input'), true);
+
+    $posnet   = floatval($payload['posnet'] ?? 0);
+    $efectivo = floatval($payload['efectivo'] ?? 0);
+
+    try {
+        $cajaModel = new \app\models\CajaModel();
+        $db = \DataBase::getInstance()->getConnection();
+
+$usuarioId = null;
+
+if (!empty($_SESSION['user_id']) && is_numeric($_SESSION['user_id'])) {
+
+    $tmpId = (int)$_SESSION['user_id'];
+
+    $chk = $db->prepare("SELECT id FROM usuarios WHERE id = ? LIMIT 1");
+    $chk->execute([$tmpId]);
+
+    if ($chk->fetchColumn()) {
+        $usuarioId = $tmpId;
+    }
+}
+
+        $exito = $cajaModel->cerrarCajaDelDia($usuarioId, null, $efectivo);
+
+        if (!$exito) {
+            echo json_encode(['status'=>'error','message'=>'No se pudo cerrar la caja']);
+            return;
         }
 
-        header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
-        exit;
+        unset($_SESSION['caja_abierta'], $_SESSION['caja_id']);
+
+        $html = "
+        <div class='modal-overlay' id='modalReporteFinal'>
+        <div class='modal-box'>
+            <div style='display:flex;justify-content:space-between;align-items:center;'>
+            <h3>Caja Cerrada</h3>
+            <button onclick=\"document.getElementById('modalReporteFinal').remove()\">✖</button>
+            </div>
+
+            <p><strong>Posnet declarado:</strong> $" . number_format($posnet,2,',','.') . "</p>
+            <p><strong>Efectivo contado:</strong> $" . number_format($efectivo,2,',','.') . "</p>
+
+            <button onclick=\"location.reload()\">Finalizar</button>
+        </div>
+        </div>";
+
+        echo json_encode([
+            'status'=>'ok',
+            'reporte'=>$html
+        ]);
+        return;
+
+    } catch (\Exception $e) {
+        echo json_encode(['status'=>'error','message'=>$e->getMessage()]);
+        return;
     }
+}
 
 // =========================
 // LIBRO DIARIO (corte 06:00)
@@ -558,89 +602,20 @@ public function actionLibroDiario()
     $inicio = new \DateTime($fechaSeleccionada . sprintf(' %02d:00:00', $cutHour));
     $fin    = (clone $inicio)->modify('+1 day');
 
-    $cajaId = $_SESSION['caja_id'] ?? null;
-
-    $stmt = $db->prepare("SELECT id FROM cajas WHERE fecha_cierre IS NULL ORDER BY fecha_apertura DESC LIMIT 1");
-    $stmt->execute();
-    $cajaAbiertaId = $stmt->fetchColumn();
-
-    if ($cajaAbiertaId) {
-        $cajaId = $cajaAbiertaId;
-    } elseif (!$cajaId) {
-        $stmt = $db->prepare("
-            SELECT id
-            FROM cajas
-            WHERE fecha_apertura >= ? AND fecha_apertura < ?
-            ORDER BY fecha_apertura DESC
-            LIMIT 1
-        ");
-        $stmt->execute([$inicio->format('Y-m-d H:i:s'), $fin->format('Y-m-d H:i:s')]);
-        $cajaId = $stmt->fetchColumn();
-    }
-
-    $inicioCaja = 0;
-    $fechaApertura = '';
-
-    if ($cajaId) {
-        $stmt = $db->prepare("SELECT saldo_inicial, fecha_apertura FROM cajas WHERE id = ?");
-        $stmt->execute([$cajaId]);
-        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-        $inicioCaja    = $row['saldo_inicial'] ?? 0;
-        $fechaApertura = $row['fecha_apertura'] ?? '';
-    }
-
     // =========================
-    // VENTAS
+    // TODAS LAS CAJAS DEL DÍA
     // =========================
     $stmt = $db->prepare("
-        SELECT p.id, p.total, p.metodo_pago, p.mesa_id, p.fecha, p.fecha_cierre
-        FROM pedidos p
-        WHERE p.caja_id = ? AND p.cerrado = 1
-          AND COALESCE(p.fecha_cierre, p.fecha) >= ?
-          AND COALESCE(p.fecha_cierre, p.fecha) <  ?
-        ORDER BY COALESCE(p.fecha_cierre, p.fecha) ASC
+        SELECT id, saldo_inicial, fecha_apertura, fecha_cierre
+        FROM cajas
+        WHERE fecha_apertura >= ? AND fecha_apertura < ?
+        ORDER BY fecha_apertura ASC
     ");
-    $stmt->execute([$cajaId, $inicio->format('Y-m-d H:i:s'), $fin->format('Y-m-d H:i:s')]);
-    $ventas = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    $stmt->execute([$inicio->format('Y-m-d H:i:s'), $fin->format('Y-m-d H:i:s')]);
+    $cajasDelDia = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
-    // =========================
-    // GASTOS
-    // =========================
-    $stmt = $db->prepare("
-        SELECT id, monto, motivo, autorizado_por, fecha
-        FROM gastos
-        WHERE caja_id = ?
-          AND fecha >= ? AND fecha < ?
-        ORDER BY fecha ASC
-    ");
-    $stmt->execute([$cajaId, $inicio->format('Y-m-d H:i:s'), $fin->format('Y-m-d H:i:s')]);
-    $gastos = $stmt->fetchAll(\PDO::FETCH_ASSOC);
-
-    // =========================
-    // CAJA FUERTE
-    // =========================
-    $stmt = $db->prepare("
-        SELECT id, monto, responsable, fecha
-        FROM caja_fuerte
-        WHERE caja_id = ?
-          AND fecha >= ? AND fecha < ?
-        ORDER BY fecha ASC
-    ");
-    $stmt->execute([$cajaId, $inicio->format('Y-m-d H:i:s'), $fin->format('Y-m-d H:i:s')]);
-    $cajaFuerte = $stmt->fetchAll(\PDO::FETCH_ASSOC);
-
-    // =========================
-    // INGRESOS
-    // =========================
-    $stmt = $db->prepare("
-        SELECT id, monto, motivo, responsable, fecha
-        FROM ingresos_caja
-        WHERE caja_id = ?
-          AND fecha >= ? AND fecha < ?
-        ORDER BY fecha ASC
-    ");
-    $stmt->execute([$cajaId, $inicio->format('Y-m-d H:i:s'), $fin->format('Y-m-d H:i:s')]);
-    $ingresosCaja = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    $movimientos = [];
+    $totales = ['efectivo'=>0,'tarjeta'=>0,'qr'=>0,'mp'=>0,'total'=>0];
 
     $cacheMesas = [];
     $getNumeroMesa = function($mesaId) use (&$cacheMesas, $db) {
@@ -653,129 +628,152 @@ public function actionLibroDiario()
         return $cacheMesas[$mesaId];
     };
 
-    $movimientos = [];
+    foreach ($cajasDelDia as $caja) {
 
-    // INICIO
-    $movimientos[] = [
-        'tipo' => 'inicio',
-        'detalle' => "INICIO DE CAJA",
-        'efectivo' => $inicioCaja,
-        'tarjeta' => '',
-        'qr' => '',
-        'mp' => '',
-        'total' => $inicioCaja,
-        'mesa' => '',
-        'fecha_hora' => $fechaApertura ?: $inicio->format('Y-m-d H:i'),
-        'ticket_id' => 0
-    ];
+        $cajaId = $caja['id'];
+        $inicioCaja = $caja['saldo_inicial'];
+        $fechaApertura = $caja['fecha_apertura'];
 
-    // =========================
-    // VENTAS (con dividido)
-    // =========================
-    $stmtPagos = $db->prepare("
-        SELECT mp.clave, SUM(pp.monto) as monto
-        FROM pedido_pagos pp
-        JOIN metodos_pago mp ON mp.id = pp.metodo_pago_id
-        WHERE pp.pedido_id = ?
-        GROUP BY mp.clave
-    ");
+        // =========================
+        // SEPARADOR VISUAL
+        // =========================
+        $movimientos[] = [
+            'tipo' => 'separador',
+            'detalle' => "===== CAJA #{$cajaId} — Apertura " . date('H:i', strtotime($fechaApertura)) . " =====",
+            'efectivo'=>'','tarjeta'=>'','qr'=>'','mp'=>'','total'=>'',
+            'mesa'=>'','fecha_hora'=>$fechaApertura,'ticket_id'=>0
+        ];
 
-    foreach ($ventas as $v) {
+        // =========================
+        // INICIO DE CAJA
+        // =========================
+        $movimientos[] = [
+            'tipo' => 'inicio',
+            'detalle' => "INICIO DE CAJA",
+            'efectivo' => $inicioCaja,
+            'tarjeta'=>'','qr'=>'','mp'=>'',
+            'total'=>$inicioCaja,
+            'mesa'=>'',
+            'fecha_hora'=>$fechaApertura,
+            'ticket_id'=>0
+        ];
 
-        $ef = $tj = $qr = $mp = '';
-        $metodo = strtolower((string)$v['metodo_pago']);
+        // =========================
+        // VENTAS
+        // =========================
+        $stmtVentas = $db->prepare("
+            SELECT p.id, p.total, p.metodo_pago, p.mesa_id, p.fecha, p.fecha_cierre
+            FROM pedidos p
+            WHERE p.caja_id = ? AND p.cerrado = 1
+              AND COALESCE(p.fecha_cierre, p.fecha) >= ?
+              AND COALESCE(p.fecha_cierre, p.fecha) < ?
+            ORDER BY COALESCE(p.fecha_cierre, p.fecha) ASC
+        ");
+        $stmtVentas->execute([$cajaId, $inicio->format('Y-m-d H:i:s'), $fin->format('Y-m-d H:i:s')]);
+        $ventas = $stmtVentas->fetchAll(\PDO::FETCH_ASSOC);
 
-        if ($metodo === 'dividido') {
-            $stmtPagos->execute([$v['id']]);
-            foreach ($stmtPagos->fetchAll(\PDO::FETCH_ASSOC) as $r) {
-                $clave = strtolower((string)$r['clave']);
-                $monto = (float)$r['monto'];
-                if ($clave === 'efectivo')    $ef = $monto;
-                if ($clave === 'tarjeta')     $tj = $monto;
-                if ($clave === 'qr')          $qr = $monto;
-                if ($clave === 'mercadopago') $mp = $monto;
+        $stmtPagos = $db->prepare("
+            SELECT mp.clave, SUM(pp.monto) as monto
+            FROM pedido_pagos pp
+            JOIN metodos_pago mp ON mp.id = pp.metodo_pago_id
+            WHERE pp.pedido_id = ?
+            GROUP BY mp.clave
+        ");
+
+        foreach ($ventas as $v) {
+
+            $ef = $tj = $qr = $mp = '';
+            $metodo = strtolower((string)$v['metodo_pago']);
+
+            if ($metodo === 'dividido') {
+                $stmtPagos->execute([$v['id']]);
+                foreach ($stmtPagos->fetchAll(\PDO::FETCH_ASSOC) as $r) {
+                    $clave = strtolower((string)$r['clave']);
+                    $monto = (float)$r['monto'];
+                    if ($clave === 'efectivo')    $ef = $monto;
+                    if ($clave === 'tarjeta')     $tj = $monto;
+                    if ($clave === 'qr')          $qr = $monto;
+                    if ($clave === 'mercadopago') $mp = $monto;
+                }
+            } else {
+                if ($metodo === 'efectivo')    $ef = $v['total'];
+                if ($metodo === 'tarjeta')     $tj = $v['total'];
+                if ($metodo === 'qr')          $qr = $v['total'];
+                if ($metodo === 'mercadopago') $mp = $v['total'];
             }
-        } else {
-            if ($metodo === 'efectivo')    $ef = $v['total'];
-            if ($metodo === 'tarjeta')     $tj = $v['total'];
-            if ($metodo === 'qr')          $qr = $v['total'];
-            if ($metodo === 'mercadopago') $mp = $v['total'];
+
+            $fechaMov = $v['fecha_cierre'] ?: $v['fecha'];
+
+            $mov = [
+                'tipo'=>'venta',
+                'detalle'=>"TICKET #" . str_pad($v['id'],4,'0',STR_PAD_LEFT),
+                'efectivo'=>$ef,'tarjeta'=>$tj,'qr'=>$qr,'mp'=>$mp,
+                'total'=>$v['total'],
+                'mesa'=>$getNumeroMesa($v['mesa_id']),
+                'fecha_hora'=>$fechaMov,
+                'ticket_id'=>$v['id']
+            ];
+
+            foreach ($totales as $k=>&$val) {
+                $val += (float)($mov[$k] ?? 0);
+            }
+
+            $movimientos[] = $mov;
         }
 
-        $fechaMov = $v['fecha_cierre'] ?: $v['fecha'];
+        // =========================
+        // INGRESOS
+        // =========================
+        $stmtIng = $db->prepare("
+            SELECT monto, motivo, responsable, fecha
+            FROM ingresos_caja
+            WHERE caja_id = ?
+              AND fecha >= ? AND fecha < ?
+            ORDER BY fecha ASC
+        ");
+        $stmtIng->execute([$cajaId,$inicio->format('Y-m-d H:i:s'),$fin->format('Y-m-d H:i:s')]);
 
-        $movimientos[] = [
-            'tipo' => 'venta',
-            'detalle' => "TICKET #" . str_pad($v['id'], 4, '0', STR_PAD_LEFT),
-            'efectivo' => $ef,
-            'tarjeta' => $tj,
-            'qr' => $qr,
-            'mp' => $mp,
-            'total' => $v['total'],
-            'mesa' => $getNumeroMesa($v['mesa_id']),
-            'fecha_hora' => date('Y-m-d H:i', strtotime($fechaMov)),
-            'ticket_id' => (int)$v['id']
-        ];
-    }
+        foreach ($stmtIng->fetchAll(\PDO::FETCH_ASSOC) as $ic) {
+            $monto = abs($ic['monto']);
+            $movimientos[] = [
+                'tipo'=>'ingreso',
+                'detalle'=>"INGRESO: {$ic['motivo']} ({$ic['responsable']})",
+                'efectivo'=>$monto,'tarjeta'=>'','qr'=>'','mp'=>'',
+                'total'=>$monto,
+                'mesa'=>'',
+                'fecha_hora'=>$ic['fecha'],
+                'ticket_id'=>0
+            ];
+            $totales['efectivo'] += $monto;
+            $totales['total'] += $monto;
+        }
 
-    // INGRESOS
-    foreach ($ingresosCaja as $ic) {
-        $movimientos[] = [
-            'tipo' => 'ingreso',
-            'detalle' => "INGRESO: " . $ic['motivo'] . " (" . $ic['responsable'] . ")",
-            'efectivo' => abs($ic['monto']),
-            'tarjeta' => '',
-            'qr' => '',
-            'mp' => '',
-            'total' => abs($ic['monto']),
-            'mesa' => '',
-            'fecha_hora' => date('Y-m-d H:i', strtotime($ic['fecha'])),
-            'ticket_id' => 0
-        ];
-    }
+        // =========================
+        // GASTOS
+        // =========================
+        $stmtGas = $db->prepare("
+            SELECT monto, motivo, fecha
+            FROM gastos
+            WHERE caja_id = ?
+              AND fecha >= ? AND fecha < ?
+            ORDER BY fecha ASC
+        ");
+        $stmtGas->execute([$cajaId,$inicio->format('Y-m-d H:i:s'),$fin->format('Y-m-d H:i:s')]);
 
-    // GASTOS
-    foreach ($gastos as $g) {
-        $movimientos[] = [
-            'tipo' => 'gasto',
-            'detalle' => "GASTO: " . $g['motivo'],
-            'efectivo' => -abs($g['monto']),
-            'tarjeta' => '',
-            'qr' => '',
-            'mp' => '',
-            'total' => -abs($g['monto']),
-            'mesa' => '',
-            'fecha_hora' => date('Y-m-d H:i', strtotime($g['fecha'])),
-            'ticket_id' => 0
-        ];
-    }
-
-    // CAJA FUERTE
-    foreach ($cajaFuerte as $cf) {
-        $movimientos[] = [
-            'tipo' => 'caja_fuerte',
-            'detalle' => "Depósito Caja Fuerte (" . $cf['responsable'] . ")",
-            'efectivo' => -abs($cf['monto']),
-            'tarjeta' => '',
-            'qr' => '',
-            'mp' => '',
-            'total' => -abs($cf['monto']),
-            'mesa' => '',
-            'fecha_hora' => date('Y-m-d H:i', strtotime($cf['fecha'])),
-            'ticket_id' => 0
-        ];
-    }
-
-    usort($movimientos, fn($a, $b) => strcmp($a['fecha_hora'], $b['fecha_hora']));
-
-    $totales = ['efectivo'=>0,'tarjeta'=>0,'qr'=>0,'mp'=>0,'total'=>0];
-
-    foreach ($movimientos as $m) {
-        $totales['efectivo'] += (float)($m['efectivo'] ?: 0);
-        $totales['tarjeta']  += (float)($m['tarjeta']  ?: 0);
-        $totales['qr']       += (float)($m['qr']       ?: 0);
-        $totales['mp']       += (float)($m['mp']       ?: 0);
-        $totales['total']    += (float)($m['total']    ?: 0);
+        foreach ($stmtGas->fetchAll(\PDO::FETCH_ASSOC) as $g) {
+            $monto = -abs($g['monto']);
+            $movimientos[] = [
+                'tipo'=>'gasto',
+                'detalle'=>"GASTO: {$g['motivo']}",
+                'efectivo'=>$monto,'tarjeta'=>'','qr'=>'','mp'=>'',
+                'total'=>$monto,
+                'mesa'=>'',
+                'fecha_hora'=>$g['fecha'],
+                'ticket_id'=>0
+            ];
+            $totales['efectivo'] += $monto;
+            $totales['total'] += $monto;
+        }
     }
 
     require __DIR__ . '/../views/cajero/libroDiario.php';

@@ -12,22 +12,17 @@ class PosController extends Controller
 
     public function actionIndex($var = null)
     {
-        // 🔥 Iniciar sesión si no está iniciada
         if (session_status() === PHP_SESSION_NONE) {
             session_start();
         }
 
-        // Base path del proyecto
         $ruta = static::path();
 
-        // Detectar si hay caja abierta
         $cajaAbierta = !empty($_SESSION['caja_id']);
 
-        // Datos para modales
         $cajaModel = new CajaModel();
         $ultimoCierre = $cajaModel->obtenerUltimoCierre();
 
-        // Layout
         $footer = SiteController::footer();
         $head   = SiteController::head();
         $nav    = SiteController::nav();
@@ -36,7 +31,7 @@ class PosController extends Controller
             "title"        => "321POS - Mostrador",
             "ruta"         => $ruta,
             "ultimoCierre" => $ultimoCierre,
-            "cajaAbierta"  => $cajaAbierta, // 👈 ESTA ES LA CLAVE
+            "cajaAbierta"  => $cajaAbierta,
             "head"         => $head,
             "nav"          => $nav,
             "footer"       => $footer,
@@ -85,12 +80,28 @@ class PosController extends Controller
 
         $negocioId = (int)($_SESSION['negocio_id'] ?? 1);
         $cajaId    = $_SESSION['caja_id'] ?? null;
-        $usuarioId = $_SESSION['user_id'] ?? null;
 
         if (!$cajaId) {
             http_response_code(409);
             echo json_encode(['status' => 'error', 'message' => 'No hay caja abierta']);
             return;
+        }
+
+        $db = DataBase::getInstance()->getConnection();
+
+        // 🔒 VALIDACIÓN SEGURA DE USUARIO (ANTI FK ERROR)
+        $usuarioId = null;
+
+        if (!empty($_SESSION['user_id']) && is_numeric($_SESSION['user_id'])) {
+
+            $tmpId = (int)$_SESSION['user_id'];
+
+            $chk = $db->prepare("SELECT id FROM usuarios WHERE id = ? LIMIT 1");
+            $chk->execute([$tmpId]);
+
+            if ($chk->fetchColumn()) {
+                $usuarioId = $tmpId;
+            }
         }
 
         // ---- Normalizar items ----
@@ -145,9 +156,8 @@ class PosController extends Controller
 
         $metodoPedido = count($pagosNorm) > 1 ? 'dividido' : $pagosNorm[0]['metodo'];
 
-        $db = DataBase::getInstance()->getConnection();
-
         try {
+
             $db->beginTransaction();
 
             $stmt = $db->prepare("
@@ -207,13 +217,18 @@ class PosController extends Controller
             $db->commit();
 
             echo json_encode(['status' => 'ok', 'pedido_id' => $pedidoId]);
+
         } catch (\Throwable $e) {
+
             if ($db->inTransaction()) {
                 $db->rollBack();
             }
 
             http_response_code(500);
-            echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+            echo json_encode([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ]);
         }
     }
 }

@@ -38,6 +38,21 @@ $cajaFuerteDet = $datos['caja_fuerte_detalle'] ?? [];
             background:black; color:white; padding:0.9rem 0; border:none; border-radius:6px;
             cursor:pointer; width:170px; font-size:1rem; text-align:center; transition:background 0.15s;
         }
+        .modal-overlay{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.5);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+.modal-box{
+  background:#fff;
+  padding:25px;
+  border-radius:10px;
+  width:350px;
+}
         .planilla-botones-derecha button:hover { background:#333; }
         .btn-rojo    { background:#c0392b !important; } .btn-rojo:hover    { background:#a93226 !important; }
         .btn-naranja { background:#d35400 !important; } .btn-naranja:hover { background:#b44200 !important; }
@@ -45,6 +60,32 @@ $cajaFuerteDet = $datos['caja_fuerte_detalle'] ?? [];
         .planilla-resumen h4 { font-size:1.8rem !important; font-weight:700 !important; color:#111 !important; margin:0 !important; padding:0 !important; border:none !important; }
         /* Filas */
         .fila-gris td { font-weight:bold; background:#ddd; }
+        .modal-box input{
+  width:100%;
+  padding:8px;
+  margin:6px 0 12px 0;
+  border:1px solid #ccc;
+  border-radius:4px;
+}
+
+.modal-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:10px;
+}
+
+.modal-actions button{
+  padding:8px 14px;
+  border:none;
+  border-radius:4px;
+  cursor:pointer;
+  background:#222;
+  color:white;
+}
+
+.modal-actions button:hover{
+  background:#444;
+}
         /* Fila con toggle para desplegar detalle */
         .fila-toggle td:first-child { cursor:pointer; user-select:none; }
         .fila-toggle td:first-child:hover { text-decoration:underline; }
@@ -220,45 +261,66 @@ $cajaFuerteDet = $datos['caja_fuerte_detalle'] ?? [];
             <!-- BOTONES DERECHA -->
             <div class="planilla-botones-derecha">
                 <button type="button" onclick="cerrarTurno()" class="btn-naranja">Cerrar Turno</button>
-                <button type="button" onclick="cerrarCaja()"  class="btn-rojo">Cerrar Caja</button>
+                <button class="btn-cerrar-caja" onclick="abrirModalCerrarCaja()">Cerrar Caja</button>
                 <button type="button" onclick="exportarPlanilla()">Exportar</button>
                 <button type="button" onclick="window.print()">Imprimir</button>
             </div>
         </div>
     </main>
+            <script>
+function abrirModalCerrarCaja(){
+  document.getElementById('modalCerrarCaja').style.display = 'flex';
+}
 
-    <script>
-        function toggleDetalle(grupo) {
-            const filas = document.querySelectorAll('.fila-' + grupo);
-            const icon  = document.getElementById('icon-' + grupo);
-            const oculto = filas[0].style.display === 'none' || filas[0].style.display === '';
-            filas.forEach(f => f.style.display = oculto ? 'table-row' : 'none');
-            icon.textContent = oculto ? '▼ ocultar' : '▶ ver detalle';
-        }
-        function cambiarFecha() {
-            const f = document.getElementById('fecha').value;
-            if (f) window.location.href = '<?= $ruta ?>/cajero/planillaCaja?fecha=' + f;
-        }
-        function cerrarTurno() {
-            if (confirm('¿Cerrar el turno actual? La caja seguirá abierta.'))
-                window.location.href = '<?= $ruta ?>/cajero/cerrarTurno';
-        }
-        function cerrarCaja() {
-            if (confirm('¿Cerrar la caja? No podrá operar hasta abrir una nueva.'))
-                window.location.href = '<?= $ruta ?>/cajero/cerrarCaja';
-        }
-        function exportarPlanilla() {
-            const f = document.getElementById('fecha').value || '<?= date('Y-m-d') ?>';
-            window.location.href = '<?= $ruta ?>/cajero/exportarPlanilla?fecha=' + f;
-        }
-        window.addEventListener('message', e => {
-            if (!e.data || e.data.type !== 'OPEN_MODAL') return;
-            switch(e.data.modal) {
-                case 'ABRIR_CAJA':  abrirCajaModal();      break;
-                case 'EGRESO':      abrirGastoModal();      break;
-                case 'CAJA_FUERTE': abrirCajaFuerteModal(); break;
-            }
-        });
-    </script>
+function cerrarModal(){
+  document.getElementById('modalCerrarCaja').style.display = 'none';
+}
+
+function confirmarCerrarCaja(){
+
+  const posnet   = parseFloat(document.getElementById('montoPosnet').value) || 0;
+  const efectivo = parseFloat(document.getElementById('montoEfectivo').value) || 0;
+
+  fetch('<?= \App::baseUrl() ?>/cajero/cerrarCaja', {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json' },
+    body: JSON.stringify({
+      posnet: posnet,
+      efectivo: efectivo
+    })
+  })
+  .then(r=>r.json())
+  .then(data=>{
+      if(data.status === 'ok'){
+          cerrarModal();
+          mostrarReporteFinal(data.reporte);
+      } else {
+          alert(data.message);
+      }
+  });
+}
+
+function mostrarReporteFinal(html){
+  const cont = document.createElement('div');
+  cont.innerHTML = html;
+  document.body.appendChild(cont);
+}
+</script>
+    <div id="modalCerrarCaja" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <h3>Cierre de Caja</h3>
+
+    <label>Monto en Posnet:</label>
+    <input type="number" id="montoPosnet" step="0.01">
+
+    <label>Efectivo contado:</label>
+    <input type="number" id="montoEfectivo" step="0.01">
+
+    <div class="modal-actions">
+      <button type="button" onclick="confirmarCerrarCaja()">Confirmar</button>
+      <button onclick="cerrarModal()">Cancelar</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

@@ -187,6 +187,12 @@
             justify-content:space-between;
             align-items:center;
         }
+        .planilla-movimientos tr.separador td{
+    background:#000 !important;
+    color:#fff !important;
+    font-weight:bold;
+    text-align:center;
+}
         #ticketModalClose{
             background:none;border:none;color:#fff;
             font-size:20px;cursor:pointer;
@@ -253,6 +259,7 @@
                     if ($tipo === 'gasto')       $trClass = 'egreso';
                     if ($tipo === 'caja_fuerte') $trClass = 'caja-fuerte';
                     if ($tipo === 'ingreso')     $trClass = 'ingreso';
+                    if ($tipo === 'separador') $trClass = 'separador';
 
                     $isVenta = ($tipo === 'venta');
                     $tid     = (int)($mov['ticket_id'] ?? 0);
