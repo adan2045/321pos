@@ -67,6 +67,11 @@
             font-weight:600;
             font-size:1.04rem;
         }
+        .planilla-movimientos tr.ingreso td{
+    color:#6b21a8 !important;        /* violeta texto */
+    background:#f3e8ff !important;   /* violeta claro fondo */
+    font-weight:bold;
+}
 
         .planilla-movimientos tbody tr:not(.total):hover td{
             background:#f6f7fa;
@@ -247,6 +252,7 @@
                     if ($tipo === 'inicio')      $trClass = 'inicio';
                     if ($tipo === 'gasto')       $trClass = 'egreso';
                     if ($tipo === 'caja_fuerte') $trClass = 'caja-fuerte';
+                    if ($tipo === 'ingreso')     $trClass = 'ingreso';
 
                     $isVenta = ($tipo === 'venta');
                     $tid     = (int)($mov['ticket_id'] ?? 0);
