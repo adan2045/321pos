@@ -237,9 +237,15 @@ class CajeroController extends Controller {
         exit;
     }
 
-    if ($redirect) { header("Location: " . $redirect); exit; }
-    header("Location: " . \App::baseUrl() . "/cajero/planillaCaja");
+    if ($aceptaJson || $esAjax) {
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['status' => 'ok']);
     exit;
+}
+
+// 👇 Siempre volver al POS
+header("Location: " . \App::baseUrl() . "/pos");
+exit;
 }
     public function actionCuentaMesa()
     {

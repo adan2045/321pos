@@ -226,6 +226,19 @@
   ::-webkit-scrollbar-track { background: #f1f1f1; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+  .ubtn.disabled-custom{
+  background: #e5e7eb !important;
+  border-color: #d1d5db !important;
+  color: #9ca3af !important;
+  cursor: not-allowed;
+  pointer-events: none;
+  transform: none !important;
+  box-shadow: var(--shadow) !important;
+}
+
+.ubtn.disabled-custom:hover{
+  background: #e5e7eb !important;
+}
 
   @media (max-width: 1024px) {
     .main-container { grid-template-columns: 220px 1fr 280px; }
@@ -272,8 +285,12 @@
     </div>
     <div class="section-divider">Gestión</div>
     <div class="btn-row">
-      <button class="ubtn inicio-caja" id="btnInicioCaja"><span class="icon">🏦</span>Inicio de Caja</button>
-      <button class="ubtn fichar"      id="btnFichar"><span class="icon">🕐</span>Fichar</button>
+<button 
+  class="ubtn inicio-caja <?= !empty($cajaAbierta) ? 'disabled-custom' : '' ?>" 
+  id="btnInicioCaja"
+>
+  <span class="icon">🏦</span>Inicio de Caja
+</button>      <button class="ubtn fichar"      id="btnFichar"><span class="icon">🕐</span>Fichar</button>
     </div>
     <div class="btn-row">
       <button class="ubtn ingresos" id="btnIngresos"><span class="icon">💰</span>Ingresos</button>
@@ -1017,18 +1034,14 @@ async function ficharCargar(){
     if(b1) b1.disabled=false; if(b2) b2.disabled=true;
     stopFicharTimer(); renderTimer(0);
     document.getElementById('ficharTimer').textContent='';
-
-    // Preferimos lo que calcule el backend (más confiable)
-    const hhmm = data.tiempo_trabajado_hhmm || (()=>{
-      const [hE,mE]=data.entrada_hora.split(':').map(Number);
-      const [hS,mS]=data.salida_hora.split(':').map(Number);
-      let totalMin=(hS*60+mS)-(hE*60+mE);
-      if(!isFinite(totalMin) || totalMin < 0) totalMin = 0;
-      return String(Math.floor(totalMin/60)).padStart(2,'0')+':'+String(totalMin%60).padStart(2,'0');
-    })();
-
-    const leyenda = data.leyenda_ultimo_turno || `Ingreso ${data.entrada_hora} | Salida ${data.salida_hora} | Tiempo trabajado ${hhmm}`;
-    if(estado) estado.innerHTML = leyenda;
+    const [hE,mE]=data.entrada_hora.split(':').map(Number);
+    const [hS,mS]=data.salida_hora.split(':').map(Number);
+    const totalMin=(hS*60+mS)-(hE*60+mE);
+    if(estado) estado.innerHTML=`Último turno — Entrada: <strong>${data.entrada_hora}</strong> &nbsp;|&nbsp; Salida: <strong>${data.salida_hora}</strong>`;
+    const resumen=document.createElement('div');
+    resumen.id='ficharResumen'; resumen.style.cssText='margin-top:8px; font-size:14px; color:#374151;';
+    resumen.innerHTML=`⏱ Tiempo trabajado: <strong>${String(Math.floor(totalMin/60)).padStart(2,'0')}:${String(totalMin%60).padStart(2,'0')}</strong>`;
+    document.getElementById('ficharTimer').after(resumen);
   } else {
     if(b1) b1.disabled=false; if(b2) b2.disabled=true;
     stopFicharTimer(); renderTimer(0);
